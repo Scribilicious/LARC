@@ -17,6 +17,7 @@ local Weapons = require("src/weapons")
 local PlayerClass = require("src/player")
 local Effects = require("src/effects")
 local Decals = require("src/decals")
+local BloodBurst = require("src/bloodburst")
 local Skybox = require("src/skybox")
 local Transitions = require("src/transitions")
 local Menu = require("src/menu")
@@ -102,6 +103,7 @@ local function InitAndLoadLevel()
 	Entities.InitEntityAssets()
 	Entities.InitEntities()
 	Decals.Clear()
+	BloodBurst.Clear()
 
 	Raycaster.RefreshSettings()
 
@@ -144,6 +146,7 @@ function love.load()
 	Weapons.InitAudio()
 	Effects.InitEffects()
 	Decals.Init()
+	BloodBurst.Init()
 
 	HUD.WeaponDisplay.Init()
 	HUD.HealthBar.Init()
@@ -393,6 +396,18 @@ local function tick(dt)
 		Weapons.CountdownMuzzleFlashCounter()
 		Weapons.CountdownCadenceCounter()
 		Effects.CountdownBloodstainCounter()
+		BloodBurst.Tick(dt)
+		local tbAge = tonumber(os.getenv("LARC_TESTBURST") or "")
+		if tbAge then
+			local b = love._larcTestBurst
+			if not b then
+				local dd = tonumber(os.getenv("LARC_TESTBURSTD")) or 1.6
+				BloodBurst.Spawn(Player.Pos.X + Player.Dir.X * dd, Player.Pos.Y + Player.Dir.Y * dd, tonumber(os.getenv("LARC_TESTBURSTH")) or 0.5)
+				b = BloodBurst.bursts[#BloodBurst.bursts]
+				love._larcTestBurst = b
+			end
+			b.birth = BloodBurst.time - tbAge
+		end
 
 		if Player.IsDead then
 			State.mode = "dying"
@@ -518,6 +533,9 @@ local function renderScene()
 	if not os.getenv("LARC_NOENTITIES") then
 		Entities.RenderEntities()
 	end
+
+	-- in front of the target: the spray bursts towards the camera
+	BloodBurst.Render()
 
 	if HUD.Minimap.Enabled then
 		HUD.Minimap.DisplayRealtimeMap()

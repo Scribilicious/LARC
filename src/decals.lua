@@ -26,6 +26,8 @@ Decals.WallHalfWidth = 0.16
 Decals.WallHalfHeight = 0.15
 Decals.FloorHalfSize = 0.25
 Decals.TextureVariants = 4
+-- 0 = hard rim and flat coverage steps, 1 = the smooth gaussian falloff
+Decals.Blur = 0
 
 -- all decals, oldest first; kind = "wall" | "floor"
 Decals.list = {}
@@ -70,6 +72,13 @@ local function makeSplatTexture(rng)
 				f = f + d.w * math.exp(-(dx * dx + dy * dy) / (2 * d.r * d.r))
 			end
 			local a = Utils.clamp(f, 0.0, 1.0)
+			-- pixel look: at Blur 0 the gaussian is thresholded into hard
+			-- drops; Blur 1 keeps the soft falloff
+			if Decals.Blur < 1 then
+				local soft = a
+				a = (a >= 0.5) and 1.0 or 0.0
+				a = a + (soft - a) * Decals.Blur
+			end
 			if a > 0.01 then
 				local shade = 0.7 + rnd() * 0.3
 				-- ImageData:setPixel takes floats in 0..1 (see AGENTS.md)
@@ -78,7 +87,8 @@ local function makeSplatTexture(rng)
 		end
 	end
 	local image = love.graphics.newImage(data)
-	image:setFilter("linear", "linear")
+	-- nearest: the splatter keeps its texel edges instead of a bilinear smear
+	image:setFilter("nearest", "nearest")
 	return image
 end
 
@@ -215,6 +225,7 @@ function Decals.Init()
 		Decals.WallHalfHeight = Config.getNumber(ini, "DECALS", "WallHalfHeight", 0.15)
 		Decals.FloorHalfSize = Config.getNumber(ini, "DECALS", "FloorHalfSize", 0.25)
 		Decals.TextureVariants = Config.getNumber(ini, "DECALS", "TextureVariants", 4)
+		Decals.Blur = Utils.clamp(Config.getNumber(ini, "DECALS", "Blur", 0), 0, 1)
 	end
 	textures = {}
 	local rng = love.math.newRandomGenerator(love.math.getRandomSeed())
@@ -260,16 +271,35 @@ function Decals.SpawnBloodHit(entity, wallInfo)
 			halfH = Decals.WallHalfHeight * (0.8 + love.math.random() * 0.5),
 			tex = textures[love.math.random(#textures)]
 		})
+		-- a kill throws a second, wider splatter up the wall
+		if dying then
+			add({
+				kind = "wall",
+				mapX = wallInfo.mapX,
+				mapY = wallInfo.mapY,
+				side = wallInfo.side,
+				wallX = Utils.clamp(wallInfo.wallX + (love.math.random() - 0.5) * 0.5, 0.05, 0.95),
+				height = Utils.clamp(wallInfo.height + (love.math.random() - 0.5) * 0.4, 0.05, 0.95),
+				halfW = Decals.WallHalfWidth * (0.5 + love.math.random() * 0.5),
+				halfH = Decals.WallHalfHeight * (0.5 + love.math.random() * 0.5),
+				tex = textures[love.math.random(#textures)]
+			})
+		end
 	end
 
-	add({
-		kind = "floor",
-		x = entity.Pos.X + (love.math.random() - 0.5) * 0.2,
-		y = entity.Pos.Y + (love.math.random() - 0.5) * 0.2,
-		half = Decals.FloorHalfSize * (dying and 1.8 or (0.8 + love.math.random() * 0.5)),
-		rot = love.math.random() * math.pi * 2,
-		tex = textures[love.math.random(#textures)]
-	})
+	-- blood on the floor at the entity's feet: a second, wider pool per hit
+	-- and a third one when the target drops
+	for i = 1, (dying and 3 or 2) do
+		local spread = 0.2 + 0.3 * (i - 1)
+		add({
+			kind = "floor",
+			x = entity.Pos.X + (love.math.random() - 0.5) * spread,
+			y = entity.Pos.Y + (love.math.random() - 0.5) * spread,
+			half = Decals.FloorHalfSize * (dying and 1.8 or (0.8 + love.math.random() * 0.5)) / (1 + 0.35 * (i - 1)),
+			rot = love.math.random() * math.pi * 2,
+			tex = textures[love.math.random(#textures)]
+		})
+	end
 end
 
 -- ------------------------------------------------------------------------

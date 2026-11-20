@@ -123,8 +123,15 @@ edges and wall-slice boundary rows.
   with a wall-shader clone (same fog + static lighting), floor decals as
   projected quads with a floor-shader clone (zbuffer occlusion). Splatter
   textures are generated procedurally at init; tunables live in the
-  `[DECALS]` section of `EffectsConfig.ini`. Decals persist until level
-  load, capped at `MaxDecals` (FIFO).
+  `[DECALS]` section of `EffectsConfig.ini` (`Blur` 0 = hard edged splatter,
+  1 = soft gaussian splatter; the splat textures use nearest filtering).
+  Decals persist until level load, capped at `MaxDecals` (FIFO).
+- `src/bloodburst.lua` (LARC addition) draws the screen-space spray on entity
+  hits as shader-computed particles: a hard fling outwards that fades in
+  flight (nothing lands on the floor), `Lifetime` 0.22s by default.
+  `[BLOODBURST] Blur` in `EffectsConfig.ini` (0..1) blends between hard pixel
+  droplets with flat coverage steps and a per-pixel stippled haze (0) and the
+  soft smooth spray (1); the default is 0.
 - `src/video.lua` (LARC addition, no C++ counterpart) manages window size /
   fullscreen / render format: the whole frame is composed into the
   internal-viewport `sceneCanvas` and blitted letterboxed via

@@ -259,6 +259,18 @@ local function checkForHit()
 			wallInfo = { mapX = mapX, mapY = mapY, side = hitSide, wallX = wallX, height = height }
 		end
 		Game.Decals.SpawnBloodHit(hitEntity, wallInfo)
+
+		-- LARC: blood spray at the impact point (world anchored, projected
+		-- per frame); height is the wall-height fraction *from the floor* of
+		-- the crosshair row, i.e. 0.5 + VerticalLook / (2 * lineHeight)
+		local dx = hitEntity.Pos.X - Player.Pos.X
+		local dy = hitEntity.Pos.Y - Player.Pos.Y
+		local hitDist = math.sqrt(dx * dx + dy * dy)
+		if hitDist > 0.05 then
+			local lineHeight = math.max(math.floor(H / hitDist), 1)
+			local hitHeight = Utils.clamp(0.5 + (VLT / 2 - math.floor(H / 2)) / lineHeight, 0.02, 0.98)
+			Game.BloodBurst.Spawn(hitEntity.Pos.X, hitEntity.Pos.Y, hitHeight)
+		end
 	end
 end
 
