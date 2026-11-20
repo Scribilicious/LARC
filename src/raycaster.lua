@@ -75,6 +75,7 @@ function Raycaster.Init()
 		quadPool[x] = love.graphics.newQuad(0, 0, 1, 1, 1, 1)
 		Raycaster.ZBuffer[x] = 1e30
 	end
+	Raycaster.ZBufferImage = zbufImage
 
 	Raycaster.initShaders()
 end
@@ -568,7 +569,15 @@ function Raycaster.render()
 	Raycaster.castWalls()
 	Raycaster.renderFloorCeiling()
 	Raycaster.renderWalls()
+	-- blood decals sit on the walls/floor, in front of them but behind entities
+	if Game.Decals then
+		Game.Decals.Render()
+	end
 end
+
+-- exposed for the decals module (src/decals.lua)
+Raycaster.WallRecords = WallRecords
+Raycaster.SendLights = sendLights
 
 Game.Raycaster = Raycaster
 return Raycaster

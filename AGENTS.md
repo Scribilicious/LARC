@@ -27,6 +27,7 @@ Runs vsynced at 60 FPS on the dev machine. Syntax check changed files with
 | `LARC_LEVEL=n` | start in level n |
 | `LARC_DEBUGFLOOR=1/2/3` | floor-shader diagnostics: 1=dist+world fract, 2=shade weight/light factor/texture idx, 3=atlas texel the GPU samples |
 | `LARC_TESTDOOR=1`, `LARC_TESTDEATH=1`, `LARC_TESTMENU=1`, `LARC_AUTOFIRE=1`, `LARC_DEBUGMOVE=1` | scenario hooks |
+| `LARC_DEBUGDECALS=1` | prints each blood decal spawn (src/decals.lua) |
 | `LARC_FULLSCREEN=1` | start fullscreen (desktop fullscreen, letterboxed scaling); overrides VideoSettings.ini |
 | `LARC_SCALE=n` | start windowed at n times the base size (16:9 windows; classic: 4:3); overrides VideoSettings.ini |
 | `LARC_ASPECT=16:9` or `16:10` | start with that render format instead of the auto-detected one |
@@ -115,6 +116,15 @@ edges and wall-slice boundary rows.
   shader arrays are sized 9 (max lights per level in the shipped data);
   if larger level data ever needs more, bump `MAX_LIGHTS` in lockstep with
   both shaders' array declarations.
+- `src/decals.lua` (LARC addition, no C++ counterpart) keeps blood decals
+  spawned when a hitscan hits an entity (`Weapons.checkForHit` continues its
+  DDA past the entity to the wall behind and reports the impact point).
+  Wall decals are drawn per screen column against `Raycaster.WallRecords`
+  with a wall-shader clone (same fog + static lighting), floor decals as
+  projected quads with a floor-shader clone (zbuffer occlusion). Splatter
+  textures are generated procedurally at init; tunables live in the
+  `[DECALS]` section of `EffectsConfig.ini`. Decals persist until level
+  load, capped at `MaxDecals` (FIFO).
 - `src/video.lua` (LARC addition, no C++ counterpart) manages window size /
   fullscreen / render format: the whole frame is composed into the
   internal-viewport `sceneCanvas` and blitted letterboxed via

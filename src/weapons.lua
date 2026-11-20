@@ -165,6 +165,9 @@ local function checkForHit()
 	end
 
 	local endloop = false
+	local wallHit = false
+	local hitSide = false
+	local hitEntity = nil
 	local inverseMatrix = 1.0 / (G.Plane.X * Player.Dir.Y - Player.Dir.X * G.Plane.Y)
 	local wallLayer = Level.layers[Level.WALL]
 	local numberOfEntities = #Entities.Entities
@@ -173,21 +176,31 @@ local function checkForHit()
 		if sideX < sideY then
 			sideX = sideX + deltaDX
 			mapX = mapX + stepX
+			hitSide = false
 		else
 			sideY = sideY + deltaDY
 			mapY = mapY + stepY
+			hitSide = true
+		end
+
+		-- safety: never run off the map (the border is always walled)
+		if mapX < 0 or mapY < 0 or mapX >= Level.LevelMapWidth or mapY >= Level.LevelMapHeight then
+			endloop = true
 		end
 
 		-- if wall was hit and no entity -> end loop
 		local wallValue = wallLayer[mapX + 1] and wallLayer[mapX + 1][mapY + 1] or 0
-		if wallValue > 0 and wallValue ~= Level.DOORWALL then
+		if not endloop and wallValue > 0 and wallValue ~= Level.DOORWALL then
 			endloop = true
+			wallHit = true
 		end
 
-		if not endloop then
+		-- LARC: an entity hit does not end the loop - keep casting to find the
+		-- wall behind it (blood decal target); only the nearest entity is hit
+		if not endloop and not hitEntity then
 			for index = 1, numberOfEntities do
 				local entity = Entities.Entities[Entities.EntityOrder[index][1]]
-				if not entity.IsDead and not endloop then
+				if not entity.IsDead and not hitEntity then
 					local textureIndex = Entities.GetEntityTextureIndex(index)
 					local epX = entity.Pos.X - Player.Pos.X
 					local epY = entity.Pos.Y - Player.Pos.Y
@@ -215,8 +228,7 @@ local function checkForHit()
 									textureX % frame.imagedata:getWidth(),
 									textureY % frame.imagedata:getHeight())
 								if a > 0 then
-									Entities.HandleEntityHit(entity)
-									endloop = true
+									hitEntity = entity
 								end
 							end
 						end
@@ -224,6 +236,29 @@ local function checkForHit()
 				end
 			end
 		end
+	end
+
+	if hitEntity then
+		Entities.HandleEntityHit(hitEntity)
+
+		-- LARC: blood decals - wall impact point behind the entity (the loop
+		-- above ended at that wall, so mapX/mapY is the wall cell)
+		local wallInfo = nil
+		if wallHit then
+			local wallDist
+			if hitSide then
+				wallDist = (mapY - Player.Pos.Y + (1.0 - stepY) * 0.5) / rayY
+			else
+				wallDist = (mapX - Player.Pos.X + (1.0 - stepX) * 0.5) / rayX
+			end
+			local wallX = hitSide and (Player.Pos.X + wallDist * rayX) or (Player.Pos.Y + wallDist * rayY)
+			wallX = wallX - math.floor(wallX)
+			-- wall height fraction at the screen center (crosshair row)
+			local lineHeight = math.floor(H / wallDist)
+			local height = Utils.clamp((2 * math.floor(H / 2) - VLT + lineHeight) / (2 * lineHeight), 0.05, 0.95)
+			wallInfo = { mapX = mapX, mapY = mapY, side = hitSide, wallX = wallX, height = height }
+		end
+		Game.Decals.SpawnBloodHit(hitEntity, wallInfo)
 	end
 end
 

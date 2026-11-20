@@ -16,6 +16,7 @@ local Doors = require("src/doors")
 local Weapons = require("src/weapons")
 local PlayerClass = require("src/player")
 local Effects = require("src/effects")
+local Decals = require("src/decals")
 local Skybox = require("src/skybox")
 local Transitions = require("src/transitions")
 local Menu = require("src/menu")
@@ -100,6 +101,7 @@ local function InitAndLoadLevel()
 
 	Entities.InitEntityAssets()
 	Entities.InitEntities()
+	Decals.Clear()
 
 	Raycaster.RefreshSettings()
 
@@ -141,6 +143,7 @@ function love.load()
 	Weapons.InitTextures()
 	Weapons.InitAudio()
 	Effects.InitEffects()
+	Decals.Init()
 
 	HUD.WeaponDisplay.Init()
 	HUD.HealthBar.Init()
