@@ -16,6 +16,11 @@ function Config.loadINI(fileName)
 	if not contents then
 		return nil
 	end
+	-- drop a UTF-8 BOM: editors may prepend one, and it would hide the first
+	-- [SECTION] header, silently discarding every key in that section
+	if contents:sub(1, 3) == "\239\187\191" then
+		contents = contents:sub(4)
+	end
 	local data = {}
 	local section
 	for line in contents:gmatch("([^\r\n]*)") do
