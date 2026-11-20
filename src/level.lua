@@ -23,6 +23,7 @@ Level.layers = {}
 Level.LevelTextures = {}
 Level.StaticLights = {}
 Level.BackgroundMusic = nil
+Level.BackgroundMusicPaused = false
 Level.LevelMapWidth = 0
 Level.LevelMapHeight = 0
 Level.LightingFlag = false
@@ -233,7 +234,11 @@ end
 
 function Level.PlayBackgroundMusic()
 	if Level.BackgroundMusicEnabled and Level.BackgroundMusic then
-		if not Level.BackgroundMusic:isPlaying() then
+		-- the pause menu pauses the track every frame (Menu.Show, like the
+		-- C++ Show()); like the C++ MP3Player.IsFinished() gate, never
+		-- resume a paused track - the LÖVE source would otherwise resume
+		-- and pause each frame, which is audible as stuttering
+		if not Level.BackgroundMusicPaused and not Level.BackgroundMusic:isPlaying() then
 			Level.BackgroundMusic:play()
 		end
 	end
@@ -242,6 +247,7 @@ end
 function Level.PauseBackgroundMusic()
 	if Level.BackgroundMusicEnabled and Level.BackgroundMusic then
 		Level.BackgroundMusic:pause()
+		Level.BackgroundMusicPaused = true
 	end
 end
 
@@ -253,6 +259,7 @@ function Level.RestartBackgroundMusic()
 			Level.BackgroundMusic:stop()
 			Level.BackgroundMusic:play()
 		end
+		Level.BackgroundMusicPaused = false
 	end
 end
 
@@ -260,6 +267,7 @@ function Level.StopBackgroundMusic()
 	if Level.BackgroundMusic then
 		Level.BackgroundMusic:stop()
 		Level.BackgroundMusic = nil
+		Level.BackgroundMusicPaused = false
 	end
 end
 

@@ -49,6 +49,23 @@ function Menu.Init()
 			end
 		end
 	end
+
+	-- the video entries in MenuDefinition.txt ("Video" / "Fullscreen" /
+	-- "Resolution", LARC additions with no C++ counterpart) carry runtime
+	-- state: fill in the current values when Video is registered
+	local Video = Game.Video
+	if Video then
+		for index = 1, #Menu.MenuItems do
+			local item = Menu.MenuItems[index]
+			if item then
+				if item.Entry == "Fullscreen" then
+					item.Entry = "Fullscreen: " .. (Video.Fullscreen and "Yes" or "No")
+				elseif item.Entry == "Resolution" then
+					item.Entry = Video.resolutionLabel()
+				end
+			end
+		end
+	end
 end
 
 function Menu.DrawItem(itemNumber, y)
@@ -92,12 +109,22 @@ end
 
 function Menu.ExecuteChoice()
 	local item = Menu.MenuItems[Menu.HighLightedItem + 1]
+	local Video = Game.Video
 
 	if item and item.Entry == "Exit Game" then
 		G.QuitGameFlag = true
 		love.event.quit()
 	elseif item and item.Entry == "Toogle Mouse / GameController" then
 		G.GameControllerFlag = not G.GameControllerFlag
+	elseif item and Video then
+		local entry = item.Entry
+		if entry:match("^Fullscreen: ") then
+			Video.toggleFullscreen()
+			item.Entry = "Fullscreen: " .. (Video.Fullscreen and "Yes" or "No")
+		elseif entry:match("^Resolution: ") then
+			Video.cycleResolution()
+			item.Entry = Video.resolutionLabel()
+		end
 	end
 end
 
@@ -109,24 +136,39 @@ function Menu.ItemDown()
 			Menu.HighLightedItem = Menu.HighLightedItem + 1
 		end
 	else
-		local selectedItem = Menu.MenuItems[Menu.SelectedItem + 1]
-		local maxChild = selectedItem.ChildItems[#selectedItem.ChildItems]
-		if Menu.HighLightedItem + 1 < maxChild then
-			Menu.HighLightedItem = Menu.HighLightedItem + 1
+		-- submenu: step to the next child of the selected item in child list
+		-- order (LARC: replaces the C++'s positional ++ walk, which assumes
+		-- all siblings are contiguous in the item list)
+		local children = Menu.MenuItems[Menu.SelectedItem + 1].ChildItems
+		for index, child in ipairs(children) do
+			if child == Menu.HighLightedItem + 1 then
+				if index < #children then
+					Menu.HighLightedItem = children[index + 1] - 1
+				end
+				break
+			end
 		end
 	end
 end
 
 function Menu.ItemUp()
 	local highlighted = Menu.MenuItems[Menu.HighLightedItem + 1]
-	local selectedItem = Menu.MenuItems[Menu.SelectedItem + 1]
 	if highlighted.Level == 0 and Menu.HighLightedItem > 0 then
 		local prevItem = Menu.MenuItems[Menu.HighLightedItem]
 		if prevItem and prevItem.Level == 0 then
 			Menu.HighLightedItem = Menu.HighLightedItem - 1
 		end
-	elseif highlighted.Level > 0 and selectedItem.ChildItems[1] < Menu.HighLightedItem + 1 then
-		Menu.HighLightedItem = Menu.HighLightedItem - 1
+	elseif highlighted.Level > 0 then
+		-- see ItemDown: walk the child list instead of item positions
+		local children = Menu.MenuItems[Menu.SelectedItem + 1].ChildItems
+		for index, child in ipairs(children) do
+			if child == Menu.HighLightedItem + 1 then
+				if index > 1 then
+					Menu.HighLightedItem = children[index - 1] - 1
+				end
+				break
+			end
+		end
 	end
 end
 

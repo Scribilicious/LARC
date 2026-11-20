@@ -402,16 +402,16 @@ local function castColumn(x, rec)
 	local textureX = math.floor(wallX * TS) % TS
 
 	local isDoor = doorNumber > -1
-	local doorShift = 0.0
 	if isDoor then
 		local door = doors[doorNumber]
 		local doorType = Game.Doors.DoorTypes[door.DoorType]
+		-- Game_Raycaster.hpp: +1 while the door is not fully closed, then the
+		-- (truncated) percent offset; the content slide itself comes from the
+		-- per-door AnimTexture written by ModifyDoorTexture (Game_Doors.hpp)
 		if door.CurrentOpenPercent > doorType.MinimumOpenPercent then
 			textureX = textureX + 1
 		end
-		-- combined U shift: Original slides content (ModifyDoorTexture) + raycaster offset
-		textureX = textureX - door.CurrentOpenPercent / doorType.MaximumOpenPercent
-		doorShift = math.floor(door.CurrentOpenPercent / (100.0 / TS) + 0.5)
+		textureX = textureX - math.floor(door.CurrentOpenPercent / doorType.MaximumOpenPercent)
 	end
 
 	-- fill record
@@ -423,7 +423,6 @@ local function castColumn(x, rec)
 	rec.lineEnd = lineEnd
 	rec.wallDist = wallDist
 	rec.textureX = textureX
-	rec.doorShift = doorShift
 	rec.mapX = math.floor(mapX)
 	rec.mapY = math.floor(mapY)
 	rec.wallX = wallX
@@ -511,7 +510,10 @@ function Raycaster.renderFloorCeiling()
 	shader:send("uMapTiles", { Level.LevelMapWidth, Level.LevelMapHeight })
 	shader:send("uAtlasTiles", { Level.atlasCols, Level.atlasRows })
 	shader:send("uTextureSize", G.TextureSize)
-	love.graphics.setBlendMode("replace")
+	-- "alpha" instead of "replace": the shader's transparent output
+	-- (ceilingIdx < 1 = sky visible) must KEEP the skybox pixels below,
+	-- like the C++ canvas that only writes pixels for drawn geometry
+	love.graphics.setBlendMode("alpha")
 	love.graphics.setColor(1, 1, 1, 1)
 	love.graphics.rectangle("fill", 0, 0, W, H)
 	love.graphics.setBlendMode("alpha")
@@ -537,7 +539,7 @@ function Raycaster.renderWalls()
 			local texture
 			if rec.isDoor then
 				local door = Raycaster.Doors[rec.doorNumber]
-				texture = Game.Doors.DoorTypes[door.DoorType].Texture
+				texture = door.AnimTexture
 			else
 				local wallValue = Level.layers[Level.WALL][rec.mapX + 1] and Level.layers[Level.WALL][rec.mapX + 1][rec.mapY + 1] or 1
 				texture = Level.LevelTextures[wallValue]
@@ -548,7 +550,7 @@ function Raycaster.renderWalls()
 					local f = Utils.shadeFactor(rec.wallDist, fog)
 					fogW = (f == -1) and 0.0 or f
 				end
-				local u = rec.textureX - rec.doorShift
+				local u = rec.textureX
 				local quad = quadPool[x]
 				quad:setViewport(u, rec.vTop, 1, rec.vBottom - rec.vTop, texture:getWidth(), texture:getHeight())
 				love.graphics.setColor(fogW, rec.wallX, rec.mapX / 256, rec.mapY / 256)

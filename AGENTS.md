@@ -4,14 +4,6 @@
 
 LARC is a faithful port of **NARC - "Not Another RayCaster"**
 (C++/OpenGL/Win32, by Stefan Kubsch, 2017-2020) to Lua + LÖVE 11.5.
-The goal is pixel-accurate rendering with the *unmodified* original game
-data: `DATA/`, `GFX/`, `SFX/`, `Fonts/` are the original NARC files and must
-**never be edited**. All gameplay/content changes happen in Lua code only.
-
-The C++ original lives in `../NARC/` (shared parent folder); each Lua module
-corresponds to one C++ header - the mapping table is in `README.md`.
-When in doubt about intended behavior, read the C++ counterpart, not this
-README: the C++ is the spec.
 
 ## Running
 
@@ -35,10 +27,15 @@ Runs vsynced at 60 FPS on the dev machine. Syntax check changed files with
 | `LARC_LEVEL=n` | start in level n |
 | `LARC_DEBUGFLOOR=1/2/3` | floor-shader diagnostics: 1=dist+world fract, 2=shade weight/light factor/texture idx, 3=atlas texel the GPU samples |
 | `LARC_TESTDOOR=1`, `LARC_TESTDEATH=1`, `LARC_TESTMENU=1`, `LARC_AUTOFIRE=1`, `LARC_DEBUGMOVE=1` | scenario hooks |
+| `LARC_FULLSCREEN=1` | start fullscreen (desktop fullscreen, letterboxed scaling); overrides VideoSettings.ini |
+| `LARC_SCALE=n` | start windowed at n times the base size (16:9 windows; classic: 4:3); overrides VideoSettings.ini |
+| `LARC_ASPECT=16:9` or `16:10` | start with that render format instead of the auto-detected one |
+| `LARC_CLASSIC=1` | classic 4:3 render viewport + 4:3 window list - the reference for the pixel verification workflow |
 
 Pixel verification workflow (used for walls/floor/ceiling/lights): run with
-`LARC_SCREENSHOT=1 LARC_NOINPUT=1 LARC_NOENTITIES=1` (+ `LARC_TESTPOS` if
-needed), then compare the screenshot in Python against a software
+`LARC_SCREENSHOT=1 LARC_NOINPUT=1 LARC_NOENTITIES=1 LARC_CLASSIC=1` (+ `LARC_TESTPOS` if
+needed) so the game renders the classic 640x480 viewport that the formulas
+below describe, then compare the screenshot in Python against a software
 reimplementation of the exact C++ formulas (DDA per column, row distance
 `currentDist = VLT / (2y - VLT)` etc.). Exclude HUD overlays from stats:
 status box (x<222, y<92), fps text+health bar (x>470, y<55), minimap
@@ -118,6 +115,28 @@ edges and wall-slice boundary rows.
   shader arrays are sized 9 (max lights per level in the shipped data);
   if larger level data ever needs more, bump `MAX_LIGHTS` in lockstep with
   both shaders' array declarations.
+- `src/video.lua` (LARC addition, no C++ counterpart) manages window size /
+  fullscreen / render format: the whole frame is composed into the
+  internal-viewport `sceneCanvas` and blitted letterboxed via
+  `Video.present()`. LARC always renders widescreen - "16:9" (640x360,
+  camera plane scaled by 4/3) or "16:10" (640x400, plane by 1.2),
+  auto-selected by desktop size, both switchable in the menu; window
+  resolutions are per scale one 16:9 and one 16:10 size, so 16:9 and 16:10
+  displays fill edge to edge (true wider FOV, not a stretch). The plane is
+  always derived from the unscaled RaycasterConfig.ini base, and
+  `Video.init` MUST run after `Raycaster.Init` (see main.lua). The weapon
+  viewmodel is bottom-anchored via `Weapons.DrawWeapon`'s `bottomShift`.
+  The classic 4:3 viewport is env-gated (`LARC_CLASSIC=1`) for the pixel
+  verification. Video settings persist in the save dir as
+  `VideoSettings.ini` (never in `DATA/`); the pause menu gets a "Video"
+  item under "Options" (Pause menu -> Options -> Video) with "Fullscreen" /
+  "Resolution" entries - the menu structure lives in
+  `MenuDefinition.txt` ("Video" / "Fullscreen" / "Resolution" are
+  LARC-added lines), and `Menu.Init` fills in the runtime values
+  (fullscreen yes/no, the resolution pick); a resolution entry carries
+  both the window size and the render format (e.g. "1280x720 (16:9)") -
+  cycling it re-applies render size and camera plane when the format
+  changes; Alt+Enter toggles fullscreen.
 
 ## Editing rules
 

@@ -26,10 +26,10 @@ function Doors.InitDoorAssets()
 		if Utils.fileExists(iniFile) then
 			local ini = Config.loadINI(iniFile)
 			local doorType = {}
-			doorType.Texture = Utils.loadImage(Config.getString(ini, "TEXTURE", "DoorTexture"))
-			doorType.Texture:setWrap("repeat")
 			local sound = Config.getString(ini, "AUDIO", "OpenCloseSound")
 			doorType.Sound = sound and love.audio.newSource(Config.fixPath(sound), "static") or nil
+			doorType.Texture, doorType.TextureData = Utils.loadImage(Config.getString(ini, "TEXTURE", "DoorTexture"))
+			doorType.Texture:setWrap("repeat")
 			doorType.OpenCloseSpeed = Config.getNumber(ini, "GENERAL", "OpenCloseSpeed", 4)
 			doorType.StayOpenTime = Config.getNumber(ini, "GENERAL", "StayOpenTime", 3) * G.FrameLock
 			doorType.MaximumOpenPercent = Config.getNumber(ini, "GENERAL", "MaximumOpenPercent", 100.0)
@@ -40,6 +40,26 @@ function Doors.InitDoorAssets()
 			break
 		end
 	end
+end
+
+-- port of Game_Doors.hpp ModifyDoorTexture: slides the texture content in
+-- place per row. The leading OpenPercent texels of each row keep their
+-- (stale) content, exactly like the C++ std::copy loop, so the partially
+-- open door shows the same leftover slivers as the original
+local function modifyDoorTexture(door)
+	local doorType = Doors.DoorTypes[door.DoorType]
+	local TS = G.TextureSize
+	-- "TextureOffset is not correct - works only when MaximumOpenPercent = 100%"
+	local textureOffset = 100.0 / TS
+	local openPercent = math.floor(door.CurrentOpenPercent / textureOffset)
+	local source = doorType.TextureData
+	local anim = door.AnimData
+	for y = 0, TS - 1 do
+		for j = 0, TS - 1 - openPercent do
+			anim:setPixel(openPercent + j, y, source:getPixel(j, y))
+		end
+	end
+	door.AnimTexture:replacePixels(anim)
 end
 
 function Doors.InitDoors()
@@ -57,6 +77,13 @@ function Doors.InitDoors()
 				door.CurrentOpenPercent = Doors.DoorTypes[foundDoorType].MinimumOpenPercent
 				door.StayOpenCounter = 0
 				door.CloseAudioFlag = false
+				-- AnimTexture starts as a copy of the original (Game_Doors.hpp Init)
+				door.AnimData = love.image.newImageData(G.TextureSize, G.TextureSize)
+				door.AnimData:paste(Doors.DoorTypes[foundDoorType].TextureData, 0, 0)
+				door.AnimTexture = love.graphics.newImage(door.AnimData)
+				door.AnimTexture:setFilter("nearest", "nearest")
+				door.AnimTexture:setWrap("repeat")
+				modifyDoorTexture(door)
 				Doors.Doors[#Doors.Doors + 1] = door
 
 				-- block the wall of the door tile (C++ sets it to INT_MAX)
@@ -81,9 +108,6 @@ function Doors.TriggerDoor()
 	end
 end
 
--- NOTE: ModifyDoorTexture (CPU texture sliding) is not needed; the raycaster
--- shader emulates the sliding via texture coordinate offsets.
-
 function Doors.OpenCloseDoors()
 	local Player = Game.Player
 	local EntityMap = Game.Entities.EntityMap
@@ -95,6 +119,7 @@ function Doors.OpenCloseDoors()
 		if door.State == "triggered" then
 			if door.CurrentOpenPercent < doorType.MaximumOpenPercent then
 				door.CurrentOpenPercent = door.CurrentOpenPercent + doorType.OpenCloseSpeed
+				modifyDoorTexture(door)
 			end
 			if door.CurrentOpenPercent >= doorType.MaximumOpenPercent then
 				door.State = "open"
@@ -116,6 +141,7 @@ function Doors.OpenCloseDoors()
 						door.CloseAudioFlag = true
 					end
 					door.CurrentOpenPercent = door.CurrentOpenPercent - doorType.OpenCloseSpeed
+					modifyDoorTexture(door)
 				end
 			end
 

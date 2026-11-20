@@ -2,3 +2,6 @@
 1,Exit Game,0,0
 2,Input,0,1
 3,Toogle Mouse / GameController,2,2
+4,Video,0,1
+5,Fullscreen,4,2
+6,Resolution,4,2

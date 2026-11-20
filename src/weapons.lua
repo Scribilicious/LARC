@@ -208,9 +208,12 @@ local function checkForHit()
 							local frames = Entities.EntityAssets[entity.TypeNumber + 1].WalkingTextures[textureIndex]
 							local frame = frames and frames[entity.WalkAnimStep + 1]
 							if frame and frame.imagedata then
+								-- LÖVE ImageData is 0-based (like the C++
+								-- Pixels array); the Lua % wrap keeps the
+								-- negative / oversized cases in range
 								local r, gg, b, a = frame.imagedata:getPixel(
-									textureX % frame.imagedata:getWidth() + 1,
-									textureY % frame.imagedata:getHeight() + 1)
+									textureX % frame.imagedata:getWidth(),
+									textureY % frame.imagedata:getHeight())
 								if a > 0 then
 									Entities.HandleEntityHit(entity)
 									endloop = true
@@ -422,9 +425,14 @@ function Weapons.DrawWeapon()
 
 	local paceWeightProduct = Weapons.WeaponPace * weapon.Weight
 
+	-- LARC widescreen addition: with the cropped 16:9 render viewport the
+	-- configured viewmodel position is shifted up so it stays anchored to
+	-- the canvas bottom like in the original 4:3 layout
+	local bottomShift = G.Canvas.Height - G.Canvas.BaseHeight
+
 	-- sway pattern is some kind of simple Lissajous figure
 	local swayX = weapon.PosX + math.floor(math.cos(paceWeightProduct) * 6.0)
-	local swayY = weapon.PosY + math.floor(math.sin(paceWeightProduct * 1.5) * 6.0)
+	local swayY = weapon.PosY + math.floor(math.sin(paceWeightProduct * 1.5) * 6.0) + bottomShift
 
 	-- draw muzzle flash if weapon is fired
 	if Weapons.WeaponMuzzleFlashFlag and weapon.MuzzleFlashTexture then

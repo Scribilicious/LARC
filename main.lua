@@ -19,6 +19,7 @@ local Effects = require("src/effects")
 local Skybox = require("src/skybox")
 local Transitions = require("src/transitions")
 local Menu = require("src/menu")
+local Video = require("src/video")
 local HUD = require("src/hud")
 local Input = require("src/input")
 
@@ -128,10 +129,14 @@ function love.load()
 	InitAndLoadGameConfig()
 
 	Input.Init()
-	Menu.Init()
 	Transitions.Init()
 
 	Raycaster.Init()
+
+	-- after Raycaster.Init: Video.init scales the camera plane from the
+	-- unscaled base (RaycasterConfig.ini); Menu.init needs Video
+	Video.init()
+	Menu.Init()
 	Weapons.InitConfig()
 	Weapons.InitTextures()
 	Weapons.InitAudio()
@@ -146,6 +151,15 @@ function love.load()
 	Doors.InitDoorAssets()
 
 	sceneCanvas = love.graphics.newCanvas(G.Canvas.Width, G.Canvas.Height)
+	sceneCanvas:setFilter("nearest", "nearest")
+
+	-- widescreen toggle reruns this: rebuild the render target and the
+	-- position-dependent prerendered minimap when the render size changes
+	Video.onRenderSizeChange = function()
+		sceneCanvas = love.graphics.newCanvas(G.Canvas.Width, G.Canvas.Height)
+		sceneCanvas:setFilter("nearest", "nearest")
+		HUD.Minimap.PreRender()
+	end
 
 	InitAndLoadLevel()
 
@@ -491,11 +505,10 @@ end
 -- Draw
 -- ------------------------------------------------------------------------
 
+-- draws the scene and HUD into the active sceneCanvas (love.draw sets it up
+-- and blits the composed frame to the window via Video.present)
 local function renderScene()
 	local HUDEnabled = G.HUDEnabled
-
-	love.graphics.setCanvas(sceneCanvas)
-	love.graphics.clear(0, 0, 0, 0)
 
 	Raycaster.render()
 
@@ -506,10 +519,6 @@ local function renderScene()
 	if HUD.Minimap.Enabled then
 		HUD.Minimap.DisplayRealtimeMap()
 	end
-
-	love.graphics.setCanvas()
-
-	love.graphics.draw(sceneCanvas, 0, 0)
 
 	if HUDEnabled then
 		HUD.HealthBar.Display()
@@ -542,24 +551,27 @@ function love.draw()
 	love.graphics.clear(0, 0, 0, 1)
 	love.graphics.setColor(1, 1, 1, 1)
 
+	-- compose the whole frame at the internal viewport size,
+	-- then scale it into the window (Video.present)
+	love.graphics.setCanvas(sceneCanvas)
+	love.graphics.clear(0, 0, 0, 0)
+
 	if State.mode == "dying" or State.mode == "dead" then
 		-- frozen scene + death overlays
 		Skybox.Render()
-		love.graphics.setCanvas(sceneCanvas)
-		love.graphics.clear(0, 0, 0, 0)
 		Raycaster.render()
 		Entities.RenderEntities()
-		love.graphics.setCanvas()
-		love.graphics.draw(sceneCanvas, 0, 0)
 		Transitions.RenderFizzleFade()
 		if State.mode == "dead" then
 			Transitions.RenderGameOverTexts()
 		end
-		return
+	else
+		Skybox.Render()
+		renderScene()
 	end
 
-	Skybox.Render()
-	renderScene()
+	love.graphics.setCanvas()
+	Video.present(sceneCanvas)
 end
 
 -- ------------------------------------------------------------------------
@@ -633,7 +645,12 @@ local function handleKey(scancode)
 	end
 end
 
-function love.keypressed(key)
+function love.keypressed(key, scancode)
+	-- LARC addition: Alt+Enter toggles fullscreen (no C++ counterpart)
+	if scancode == "return" and (love.keyboard.isDown("lalt") or love.keyboard.isDown("ralt")) then
+		Video.toggleFullscreen()
+		return
+	end
 	handleKey(key)
 end
 

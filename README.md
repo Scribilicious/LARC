@@ -3,11 +3,6 @@
 A port of **NARC - "Not Another RayCaster"** (© 2017-2020 Stefan Kubsch, https://github.com/StefanKubsch/NARC)
 from C++/OpenGL/Win32 to **Lua + LÖVE** ("LOVE 2D", tested with LÖVE 11.5).
 
-The game runs at 60 FPS with the original game data: it reads the same
-`DATA/`, `GFX/`, `SFX/` and `Fonts/` folders as the C++ original - all game
-content (maps, textures, entities, weapons, lights, sounds) is defined in
-those config files and is not modified.
-
 ## Running
 
 ```sh
@@ -60,6 +55,7 @@ DPAD right reloads. Switch between mouse and gamepad via menu
 | `src/menu.lua` | `Game_MenuClass.hpp` |
 | `src/hud.lua` | `Game_HealthBarClass.hpp`, `Game_WeaponDisplayClass.hpp`, `Game_MinimapClass.hpp` |
 | `src/input.lua` | `HID_Keyboard.hpp`, `HID_Mouse.hpp`, `HID_Gamepad.hpp` |
+| `src/video.lua` | LARC addition (fullscreen / window scale / 16:9 and 16:10 widescreen render; the C++ asked "Fullscreen (y/n)" on the console) |
 
 ## Rendering design
 
