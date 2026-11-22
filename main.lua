@@ -15,7 +15,7 @@ local Entities = require("src/entities")
 local Doors = require("src/doors")
 local Weapons = require("src/weapons")
 local PlayerClass = require("src/player")
-local Effects = require("src/effects")
+local BloodHud = require("src/bloodhud")
 local Bloodstain = require("src/bloodstain")
 local BloodBurst = require("src/bloodburst")
 local Skybox = require("src/skybox")
@@ -104,6 +104,7 @@ local function InitAndLoadLevel()
 	Entities.InitEntities()
 	Bloodstain.Clear()
 	BloodBurst.Clear()
+	BloodHud.Clear()
 
 	Raycaster.RefreshSettings()
 
@@ -140,11 +141,11 @@ function love.load()
 	-- after Raycaster.Init: Video.init scales the camera plane from the
 	-- unscaled base (RaycasterConfig.ini); Menu.init needs Video
 	Video.init()
+	BloodHud.Init()
 	Menu.Init()
 	Weapons.InitConfig()
 	Weapons.InitTextures()
 	Weapons.InitAudio()
-	Effects.InitEffects()
 	Bloodstain.Init()
 	BloodBurst.Init()
 
@@ -179,6 +180,14 @@ function love.load()
 			print(string.format("LARC debug: teleported player to %.1f,%.1f (dir %.1f,%.1f)",
 				Player.Pos.X, Player.Pos.Y, Player.Dir.X, Player.Dir.Y))
 		end
+	end
+
+	-- debug helper: LARC_TESTHP=<hitpoints> sets the player's health at start
+	-- (e.g. 4 to show the low-health red tint at the default 10% threshold)
+	local testhp = tonumber(os.getenv("LARC_TESTHP") or "")
+	if testhp then
+		Player.Hitpoints = testhp
+		print(string.format("LARC debug: hitpoints set to %d/%d", Player.Hitpoints, Player.MaxHitpoints))
 	end
 
 	-- debug helper: LARC_TESTDOOR=1 teleports the player near the door at tile (6,4) and triggers it
@@ -395,12 +404,30 @@ local function tick(dt)
 		Weapons.CheckReloadStatus()
 		Weapons.CountdownMuzzleFlashCounter()
 		Weapons.CountdownCadenceCounter()
-		Effects.CountdownBloodstainCounter()
 		BloodBurst.Tick(dt)
+		BloodHud.Tick(dt)
+		-- debug: LARC_TESTBLOODHUD=<seconds> holds one splat at that age, so a
+		-- screenshot always shows the same fade state (like LARC_TESTBURST)
+		local bhAge = tonumber(os.getenv("LARC_TESTBLOODHUD") or "")
+		if bhAge then
+			local splat = BloodHud.splats[1]
+			if not splat then
+				BloodHud.Spawn(tonumber(os.getenv("LARC_TESTBLOODHUDDAMAGE")) or 10)
+				splat = BloodHud.splats[1]
+			end
+			if splat then
+				for index = #BloodHud.splats, 2, -1 do
+					table.remove(BloodHud.splats, index)
+				end
+				splat.birth = BloodHud.Time - bhAge
+			end
+		end
 		local tbAge = tonumber(os.getenv("LARC_TESTBURST") or "")
 		if tbAge then
+			-- re-spawn when a level load cleared the list, or the cached burst
+			-- is orphaned and the hook would silently stop showing anything
 			local b = love._larcTestBurst
-			if not b then
+			if not b or BloodBurst.bursts[#BloodBurst.bursts] ~= b then
 				local dd = tonumber(os.getenv("LARC_TESTBURSTD")) or 1.6
 				BloodBurst.Spawn(Player.Pos.X + Player.Dir.X * dd, Player.Pos.Y + Player.Dir.Y * dd, tonumber(os.getenv("LARC_TESTBURSTH")) or 0.5)
 				b = BloodBurst.bursts[#BloodBurst.bursts]
@@ -561,7 +588,8 @@ local function renderScene()
 		HUD.Minimap.DisplayPreRenderedMap()
 	end
 
-	Effects.DrawBloodstain()
+	-- over everything: the HUD blood splatter and the low-health tint
+	BloodHud.Render()
 
 	if G.GamePausedFlag then
 		Menu.Show()

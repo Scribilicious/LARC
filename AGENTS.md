@@ -28,6 +28,8 @@ Runs vsynced at 60 FPS on the dev machine. Syntax check changed files with
 | `LARC_DEBUGFLOOR=1/2/3` | floor-shader diagnostics: 1=dist+world fract, 2=shade weight/light factor/texture idx, 3=atlas texel the GPU samples |
 | `LARC_TESTDOOR=1`, `LARC_TESTDEATH=1`, `LARC_TESTMENU=1`, `LARC_AUTOFIRE=1`, `LARC_DEBUGMOVE=1` | scenario hooks |
 | `LARC_DEBUGBLOODSTAIN=1` | prints each blood stain spawn (src/bloodstain.lua) |
+| `LARC_TESTBLOODHUD=<seconds>` | holds one HUD splat at that age (repeatable fade screenshots); `LARC_TESTBLOODHUDDAMAGE=n` sets the hit size |
+| `LARC_TESTHP=n` | sets the player's hitpoints at start (e.g. 4 shows the low-health tint) |
 | `LARC_FULLSCREEN=1` | start fullscreen (desktop fullscreen, letterboxed scaling); overrides VideoSettings.ini |
 | `LARC_SCALE=n` | start windowed at n times the base size (16:9 windows; classic: 4:3); overrides VideoSettings.ini |
 | `LARC_ASPECT=16:9` or `16:10` | start with that render format instead of the auto-detected one |
@@ -130,8 +132,25 @@ edges and wall-slice boundary rows.
   column quads are built in, so do not shrink it. Tunables live in the
   `[BLOODSTAIN]` section of `EffectsConfig.ini` (`Blur` 0 = hard edged drops
   in flat coverage steps, 1 = soft round spray). Stains persist until level
-  load, capped at `MaxStains` (FIFO). Note `Effects.Bloodstain*` in
-  `src/effects.lua` is the unrelated C++ screen-damage overlay.
+  load, capped at `MaxStains` (FIFO).
+- `src/bloodhud.lua` (LARC addition) replaces the C++ screen-damage overlay
+  (`Game_Effects.hpp` drawing `GFX/Effects/Bloodstains.png`, deleted with
+  `src/effects.lua`). `Player:HurtPlayer` calls `BloodHud.Spawn(damage)`:
+  every hit throws shader-drawn splats (the stains' hash-droplet construction,
+  built in screen space) anchored to the canvas by fraction and biased towards
+  the border so the crosshair stays readable. The drops are not frozen: each
+  one runs down the screen by `Slide` x its own hash speed, accelerating as
+  `pow(age / FadeTime, 1.6)`, dragging a tail above its head that grows the
+  faster it runs (round drop on impact, long thin drip later). Splats hold full
+  strength for `Hold` of `FadeTime`, then fade linearly and are removed in
+  `Tick`; `Splats` is scaled by `damage/10` (clamped 0.5..2).
+  It also draws the low-health tint: a red vignette that ramps in as the
+  health fraction drops below `LowHealthThreshold` (0.1 = 10%), peaking at
+  `LowHealthStrength` alpha, with a ~72 BPM heartbeat pulse. Needs
+  `Player.MaxHitpoints` (set in `Player:InitConfig`). Every tunable lives in
+  the `[BLOODHUD]` section of `EffectsConfig.ini` - the effect has no pause
+  menu entries and no saved override file. `BloodHud.Render` is the last HUD
+  pass, so the blood lies over the health bar and the weapon viewmodel.
 - `src/bloodburst.lua` (LARC addition) draws the screen-space spray on entity
   hits as shader-computed particles: a hard fling outwards that fades in
   flight (nothing lands on the floor), `Lifetime` 0.22s by default.

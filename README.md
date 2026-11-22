@@ -49,7 +49,7 @@ DPAD right reloads. Switch between mouse and gamepad via menu
 | `src/doors.lua` | `Game_Doors.hpp` |
 | `src/weapons.lua` | `Game_WeaponHandling.hpp` |
 | `src/player.lua` | `Game_PlayerClass.hpp` |
-| `src/effects.lua` | `Game_Effects.hpp` |
+| `src/bloodhud.lua` | LARC addition: replaces the `Game_Effects.hpp` screen bloodstain overlay (shader-drawn HUD splats + low-health tint) |
 | `src/skybox.lua` | `Game_SkyboxHandling.hpp` |
 | `src/transitions.lua` | `Game_Transitions.hpp` (fizzle fade / death sequence) |
 | `src/menu.lua` | `Game_MenuClass.hpp` |
@@ -89,6 +89,11 @@ identical math but rasterizes on the GPU:
 - The A* path is recalculated every 0.25s per entity instead of every frame
   (it is only used for the minimap waypoint debug display).
 - Footsteps play as a loop while moving instead of restarting an MP3 chunk.
+- The fixed `GFX/Effects/Bloodstains.png` screen overlay of the original is
+  replaced by `src/bloodhud.lua`: every hit spawns its own screen-space blood
+  splat (shader-placed drops that slowly glide down the screen) plus a red
+  tint that ramps in below 10% health. Both are tuned in the `[BLOODHUD]`
+  section of `DATA/GameConfig/EffectsConfig.ini`.
 - Death uses single-shot bits of the Feistel network like the original; on
   640x480 the original Feistel permutation only covers about 29% of screen
   pixels, which is kept faithfully.

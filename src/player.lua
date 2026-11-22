@@ -22,6 +22,7 @@ function Player.new()
 	self.StepWidth = { X = 0.0, Y = 0.0 }
 	self.SelectedWeapon = 0
 	self.Hitpoints = 100
+	self.MaxHitpoints = self.Hitpoints
 	self.MoveSpeed = 0.0
 	self.CollisionDetectionFactor = 0.0
 	self.IsDead = false
@@ -35,6 +36,7 @@ function Player:InitConfig()
 	if ini then
 		self.MoveSpeed = Config.getNumber(ini, "GENERAL", "MoveSpeed", 1.0)
 		self.Hitpoints = Config.getNumber(ini, "GENERAL", "Hitpoints", 100)
+		self.MaxHitpoints = self.Hitpoints
 		self.CollisionDetectionFactor = self.MoveSpeed + Config.getNumber(ini, "GENERAL", "CollisionDetectionWallDist", 0.25)
 		self.Pos.X = Config.getNumber(ini, "POSITION", "PosX", 1.5)
 		self.Pos.Y = Config.getNumber(ini, "POSITION", "PosY", 1.5)
@@ -69,7 +71,7 @@ function Player:HurtPlayer(damageDealt)
 
 	if self.Hitpoints > 0 then
 		self:PlayAudio(Player.SOUNDS.HURT)
-		Game.Effects.StartBloodstainDrawing()
+		Game.BloodHud.Spawn(damageDealt)
 	end
 
 	if self.Hitpoints <= 0 then

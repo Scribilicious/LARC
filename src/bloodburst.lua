@@ -40,6 +40,11 @@ uniform float uSeed;
 // fog weight of the impact depth, so the spray darkens with distance like the
 // walls and entities it is drawn on top of
 uniform float uShade;
+// fall acceleration in droplet radii/s^2, and the downward travel (in radii)
+// from the impact point to the floor line of its column - the droplets bounce
+// off that line
+uniform float uGravity;
+uniform float uFloor;
 // 0 = hard edged droplets, flat coverage steps and a per-pixel stippled haze;
 // 1 = the smooth spray. Values in between blend the two
 uniform float uBlur;
@@ -60,31 +65,52 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 	for (int i = 1; i <= 150; ++i) {
 		float fi = float(i);
 		float h1 = hash(fi * 12.9898 + uSeed * 78.233);
+		float h2 = fract(h1 * 37.77);
+		float h3 = fract(h1 * 91.31);
 		float a = h1 * 6.2831853;
 		// a hard fling away from the impact point, in droplet radii per second
-		float sp = 6.0 + fract(h1 * 37.77) * 10.0;
+		float sp = 4.0 + h2 * 5.0;
 		// sizes stay close together so the spray reads as one splash instead of
-		// a couple of huge discs next to specks: 0.07..0.14 for the cloud and
-		// only ~1.4x that for the chunks carried along with it
-		float sz = 0.07 + fract(h1 * 91.31) * 0.07;
-		if (fi <= 12.0) {
-			sz = 0.13 + fract(h1 * 91.31) * 0.05;
-			sp = sp * 0.7;
+		// a couple of huge discs next to specks: 0.11..0.24 for the cloud and
+		// only ~1.6x that for the chunks carried along with it
+		float sz = 0.11 + h3 * 0.13;
+		if (fi <= 14.0) {
+			sz = 0.24 + h3 * 0.14;
+			sp = sp * 0.6;
 		}
-		// flung outwards and slightly down, decelerating as it goes; there is
-		// no landing - the burst is over before anything could pool. The small
-		// head start splits the droplets on the first frame, so the impact does
-		// not read as a single dot that later breaks apart
-		vec2 dir = vec2(cos(a), sin(a) * 0.75 - 0.3);
-		float start = 0.12 + fract(h1 * 23.31) * 0.42;
-		vec2 offset = dir * (start + sp * uTime * (1.0 - 0.45 * t)) + vec2(0.0, 0.35 * t * t);
+		// sideways fling plus a short throw upwards; gravity does the rest. The
+		// small head start splits the droplets on the first frame, so the impact
+		// does not read as a single dot that later breaks apart
+		vec2 dir = vec2(cos(a), sin(a) * 0.85);
+		float head = 0.15 + fract(h1 * 23.31) * 0.35;
+		float vx0 = dir.x * sp;
+		float vy0 = dir.y * sp * 0.6 - 0.8 - h2 * 1.2;
+		// flight: sideways with drag, downwards with gravity, until the droplet
+		// crosses the floor line of its column and bounces back up off it
+		float tb = (-vy0 + sqrt(vy0 * vy0 + 2.0 * uGravity * uFloor)) / max(uGravity, 0.0001);
+		float px = dir.x * head + vx0 * uTime * (1.0 - 0.3 * t);
+		float py;
+		float vy;
+		if (uTime < tb) {
+			py = vy0 * uTime + 0.5 * uGravity * uTime * uTime;
+			vy = vy0 + uGravity * uTime;
+		} else {
+			float after = uTime - tb;
+			float vUp = -0.45 * (vy0 + uGravity * tb);
+			py = uFloor + vUp * after + 0.5 * uGravity * after * after;
+			vy = vUp + uGravity * after;
+			// the bounce brings it back down: from there it rests on the floor
+			if (py > uFloor) { py = uFloor; vy = 0.0; }
+			px = px * 0.9;
+		}
+		vec2 offset = vec2(px, py);
 		// stretched along the flight path, shrinking as it dries out
-		vec2 vdir = normalize(dir + vec2(0.0, 0.7 * t) + vec2(0.0, 0.0001));
+		vec2 vdir = normalize(vec2(dir.x * sp * (1.0 - 0.6 * t), vy) + vec2(0.0, 0.0001));
 		vec2 vn = vec2(-vdir.y, vdir.x);
 		vec2 rel = sc - (uOrigin + offset * uRadius);
 		float streak = 1.0 + 0.9 * t;
 		float d = length(vec2(dot(rel, vdir) / streak, dot(rel, vn)));
-		float rad = uRadius * sz * (1.0 - 0.45 * t);
+		float rad = uRadius * sz * (1.0 - 0.4 * t);
 		// hard disc where uBlur is 0, soft falloff towards the rim where it is 1
 		float m = mix(step(d, rad), 1.0 - smoothstep(rad * 0.45, rad, d), uBlur);
 		float w = m * (1.0 - t * t);
@@ -96,8 +122,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 	// short hit instead of a lingering cloud. At uBlur 0 it is stippled per
 	// screen pixel instead of fading smoothly
 	float mistDist = length(sc - uOrigin);
-	float mistR = uRadius * (0.15 + 1.3 * t);
-	float mist = (1.0 - smoothstep(mistR * 0.25, mistR, mistDist)) * 0.24 * (1.0 - t) * (1.0 - t);
+	float mistR = uRadius * (0.22 + 1.3 * t);
+	float mist = (1.0 - smoothstep(mistR * 0.25, mistR, mistDist)) * 0.3 * (1.0 - t) * (1.0 - t);
 	float stipple = hash(floor(sc.x) * 12.9898 + floor(sc.y) * 78.233 + uSeed * 3.71);
 	mist = mix(step(stipple, mist), mist, uBlur);
 	cover = cover + mist;
@@ -106,7 +132,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 	if (cover < 0.02) { discard; }
 	// dense overlaps go opaque, like a splat rather than smoke; at uBlur 0 the
 	// coverage snaps to flat steps instead of shading a smooth ramp
-	float alpha = 1.0 - exp(-cover * 1.5);
+	float alpha = 1.0 - exp(-cover * 1.8);
 	alpha = mix(floor(alpha * 4.0 + 0.5) * 0.25, alpha, uBlur);
 	vec3 col = mix(vec3(0.26, 0.01, 0.02), vec3(0.62, 0.05, 0.05), clamp(tint / cover, 0.0, 1.0));
 	return vec4(col * uShade, alpha * 0.95);
@@ -203,20 +229,31 @@ function BloodBurst.Render()
 					local f = Utils.shadeFactor(d, fog)
 					shade = (f == -1) and 0.0 or f
 				end
-				-- bounding box: a droplet thrown at the shader's top speed
-				-- (16 radii/s, decelerating to 55%) stays inside this radius,
-				-- plus room for its own size and the expanding haze puff
-				local reach = radius * (16 * b.life * 0.55 + 1.3)
+				-- how far (in droplet radii) below the impact point the floor
+				-- line of this column runs: the origin sits at wall height h
+				local floorDrop = (H / d) * b.h / radius
+				-- gravity that brings the droplets down onto the floor after 60%
+				-- of the burst life: the spray is seen flying first, then it
+				-- falls and bounces off the floor for the rest of the burst
+				local fallTime = math.max(b.life * 0.6, 0.05)
+				local gravity = 2 * floorDrop / (fallTime * fallTime)
+				-- bounding box: droplets thrown at the shader's top speed
+				-- (14 radii/s) plus their own size, and never further down than
+				-- the floor line plus a little for the splash up off it
+				local reach = radius * (14 * b.life * 0.7 + 1.3)
+				local floorY = math.min(sy + floorDrop * radius, H)
 				local x0 = math.max(sx - reach, 0)
 				local y0 = math.max(sy - reach, 0)
 				local x1 = math.min(sx + reach, W)
-				local y1 = math.min(sy + reach, H)
+				local y1 = math.min(math.max(sy, floorY) + radius * 0.8, H)
 				if x1 > x0 and y1 > y0 then
 					shader:send("uOrigin", { sx, sy })
 					shader:send("uRadius", radius)
 					shader:send("uTime", age)
 					shader:send("uLife", b.life)
 					shader:send("uSeed", b.seed)
+					shader:send("uGravity", gravity)
+					shader:send("uFloor", floorDrop)
 					shader:send("uShade", shade)
 					shader:send("uBlur", BloodBurst.Blur)
 					love.graphics.rectangle("fill", x0, y0, x1 - x0, y1 - y0)
