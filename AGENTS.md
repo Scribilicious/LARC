@@ -27,7 +27,7 @@ Runs vsynced at 60 FPS on the dev machine. Syntax check changed files with
 | `LARC_LEVEL=n` | start in level n |
 | `LARC_DEBUGFLOOR=1/2/3` | floor-shader diagnostics: 1=dist+world fract, 2=shade weight/light factor/texture idx, 3=atlas texel the GPU samples |
 | `LARC_TESTDOOR=1`, `LARC_TESTDEATH=1`, `LARC_TESTMENU=1`, `LARC_AUTOFIRE=1`, `LARC_DEBUGMOVE=1` | scenario hooks |
-| `LARC_DEBUGDECALS=1` | prints each blood decal spawn (src/decals.lua) |
+| `LARC_DEBUGBLOODSTAIN=1` | prints each blood stain spawn (src/bloodstain.lua) |
 | `LARC_FULLSCREEN=1` | start fullscreen (desktop fullscreen, letterboxed scaling); overrides VideoSettings.ini |
 | `LARC_SCALE=n` | start windowed at n times the base size (16:9 windows; classic: 4:3); overrides VideoSettings.ini |
 | `LARC_ASPECT=16:9` or `16:10` | start with that render format instead of the auto-detected one |
@@ -116,22 +116,38 @@ edges and wall-slice boundary rows.
   shader arrays are sized 9 (max lights per level in the shipped data);
   if larger level data ever needs more, bump `MAX_LIGHTS` in lockstep with
   both shaders' array declarations.
-- `src/decals.lua` (LARC addition, no C++ counterpart) keeps blood decals
+- `src/bloodstain.lua` (LARC addition, no C++ counterpart) keeps blood stains
   spawned when a hitscan hits an entity (`Weapons.checkForHit` continues its
   DDA past the entity to the wall behind and reports the impact point).
-  Wall decals are drawn per screen column against `Raycaster.WallRecords`
-  with a wall-shader clone (same fog + static lighting), floor decals as
-  projected quads with a floor-shader clone (zbuffer occlusion). Splatter
-  textures are generated procedurally at init; tunables live in the
-  `[DECALS]` section of `EffectsConfig.ini` (`Blur` 0 = hard edged splatter,
-  1 = soft gaussian splatter; the splat textures use nearest filtering).
-  Decals persist until level load, capped at `MaxDecals` (FIFO).
+  Wall stains are drawn per screen column against `Raycaster.WallRecords`
+  with a wall-shader clone (same fog + static lighting), floor stains as
+  projected quads with a floor-shader clone (zbuffer occlusion). The pattern
+  is NOT a texture: `stainPixel()` in the shared shader chunk computes it per
+  pixel with the same hash-placed droplets as the impact burst, frozen in the
+  stain's local [-1,1] space (a dense core, specks flung outwards, vertical
+  drips). Both wall and floor stains draw with one plain 64x64 white texture
+  that only exists to carry the quads - its size also sets the texel scale the
+  column quads are built in, so do not shrink it. Tunables live in the
+  `[BLOODSTAIN]` section of `EffectsConfig.ini` (`Blur` 0 = hard edged drops
+  in flat coverage steps, 1 = soft round spray). Stains persist until level
+  load, capped at `MaxStains` (FIFO). Note `Effects.Bloodstain*` in
+  `src/effects.lua` is the unrelated C++ screen-damage overlay.
 - `src/bloodburst.lua` (LARC addition) draws the screen-space spray on entity
   hits as shader-computed particles: a hard fling outwards that fades in
   flight (nothing lands on the floor), `Lifetime` 0.22s by default.
   `[BLOODBURST] Blur` in `EffectsConfig.ini` (0..1) blends between hard pixel
   droplets with flat coverage steps and a per-pixel stippled haze (0) and the
   soft smooth spray (1); the default is 0.
+- `src/sound.lua` (LARC addition, no C++ counterpart) is a retriggerable sound:
+  `Sound.New(file, { Voices = n, Volume, Pitch, PitchJitter })` loads the file
+  once and keeps a pool of static voices cloned from that SoundData, played
+  round-robin (`:Play()`, `:Stop()`, `:IsPlaying()`, `:GetDuration()`), so a
+  sample longer than the interval it is retriggered at is never cut off. When
+  the pool is exhausted the oldest voice is restarted. Weapon sounds use it
+  (a shot has to overlap itself: the ARX160 blast is 1.41s at cadence 500,
+  i.e. 8.5 shots/s); `PitchJitter` keeps stacked retriggers from phasing into
+  one thick sample. Doors / entities / footsteps still use bare
+  `love.audio.newSource` and can be moved over the same way.
 - `src/video.lua` (LARC addition, no C++ counterpart) manages window size /
   fullscreen / render format: the whole frame is composed into the
   internal-viewport `sceneCanvas` and blitted letterboxed via

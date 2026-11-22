@@ -569,13 +569,13 @@ function Raycaster.render()
 	Raycaster.castWalls()
 	Raycaster.renderFloorCeiling()
 	Raycaster.renderWalls()
-	-- blood decals sit on the walls/floor, in front of them but behind entities
-	if Game.Decals then
-		Game.Decals.Render()
+	-- blood stains sit on the walls/floor, in front of them but behind entities
+	if Game.Bloodstain then
+		Game.Bloodstain.Render()
 	end
 end
 
--- exposed for the decals module (src/decals.lua)
+-- exposed for the bloodstain module (src/bloodstain.lua)
 Raycaster.WallRecords = WallRecords
 Raycaster.SendLights = sendLights
 

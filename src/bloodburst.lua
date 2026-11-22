@@ -63,16 +63,21 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 		float a = h1 * 6.2831853;
 		// a hard fling away from the impact point, in droplet radii per second
 		float sp = 6.0 + fract(h1 * 37.77) * 10.0;
-		// a few fat chunks riding along with a cloud of fine specks
-		float sz = 0.05 + fract(h1 * 91.31) * 0.14;
-		if (fi <= 8.0) {
-			sz = 0.4 + fract(h1 * 91.31) * 0.45;
-			sp = sp * 0.45;
+		// sizes stay close together so the spray reads as one splash instead of
+		// a couple of huge discs next to specks: 0.07..0.14 for the cloud and
+		// only ~1.4x that for the chunks carried along with it
+		float sz = 0.07 + fract(h1 * 91.31) * 0.07;
+		if (fi <= 12.0) {
+			sz = 0.13 + fract(h1 * 91.31) * 0.05;
+			sp = sp * 0.7;
 		}
 		// flung outwards and slightly down, decelerating as it goes; there is
-		// no landing - the burst is over before anything could pool
+		// no landing - the burst is over before anything could pool. The small
+		// head start splits the droplets on the first frame, so the impact does
+		// not read as a single dot that later breaks apart
 		vec2 dir = vec2(cos(a), sin(a) * 0.75 - 0.3);
-		vec2 offset = dir * (sp * uTime * (1.0 - 0.45 * t)) + vec2(0.0, 0.35 * t * t);
+		float start = 0.12 + fract(h1 * 23.31) * 0.42;
+		vec2 offset = dir * (start + sp * uTime * (1.0 - 0.45 * t)) + vec2(0.0, 0.35 * t * t);
 		// stretched along the flight path, shrinking as it dries out
 		vec2 vdir = normalize(dir + vec2(0.0, 0.7 * t) + vec2(0.0, 0.0001));
 		vec2 vn = vec2(-vdir.y, vdir.x);
@@ -91,8 +96,8 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 	// short hit instead of a lingering cloud. At uBlur 0 it is stippled per
 	// screen pixel instead of fading smoothly
 	float mistDist = length(sc - uOrigin);
-	float mistR = uRadius * (0.35 + 1.1 * t);
-	float mist = (1.0 - smoothstep(mistR * 0.25, mistR, mistDist)) * 0.32 * (1.0 - t) * (1.0 - t);
+	float mistR = uRadius * (0.15 + 1.3 * t);
+	float mist = (1.0 - smoothstep(mistR * 0.25, mistR, mistDist)) * 0.24 * (1.0 - t) * (1.0 - t);
 	float stipple = hash(floor(sc.x) * 12.9898 + floor(sc.y) * 78.233 + uSeed * 3.71);
 	mist = mix(step(stipple, mist), mist, uBlur);
 	cover = cover + mist;
@@ -142,7 +147,8 @@ function BloodBurst.Spawn(worldX, worldY, height)
 		birth = BloodBurst.time,
 		life = BloodBurst.Lifetime,
 		seed = love.math.random() * 100,
-		radius = BloodBurst.WorldRadius * BloodBurst.Size * (0.8 + love.math.random() * 0.5)
+		-- radius = BloodBurst.WorldRadius * BloodBurst.Size * (0.8 + love.math.random() * 0.5)
+		radius = BloodBurst.WorldRadius * BloodBurst.Size * love.math.random()
 	}
 	while #BloodBurst.bursts > BloodBurst.MaxBursts do
 		table.remove(BloodBurst.bursts, 1)

@@ -1,16 +1,20 @@
 --
--- decals.lua - blood stain decals on walls and floors
--- LARC addition (no C++ counterpart): when a hitscan connects, a splatter is
+-- bloodstain.lua - blood stains on walls and floors
+-- LARC addition (no C++ counterpart): when a hitscan connects, a stain is
 -- spawned on the wall behind the entity at the crosshair height and a pool
 -- at the entity's feet, like projected decals in the referenced technique.
 --
---  * wall decals: drawn per screen column against Raycaster.WallRecords, so
+--  * wall stains: drawn per screen column against Raycaster.WallRecords, so
 --    they get the exact perspective, fog and static lighting of the wall
---    slice they sit on (the wall decal shader mirrors the wall shader)
---  * floor decals: one screen-space bbox quad per decal; the shader
+--    slice they sit on (the wall stain shader mirrors the wall shader)
+--  * floor stains: one screen-space bbox quad per stain; the shader
 --    reconstructs the world position per pixel (same math as the floor
---    shader) and tests membership in the rotated decal rectangle, with
+--    shader) and tests membership in the rotated stain rectangle, with
 --    zbuffer occlusion so walls correctly cover the pool
+--
+-- The pattern itself is computed per pixel from the stain's seed, with the
+-- same hash-placed droplets as the impact burst (src/bloodburst.lua), frozen
+-- in local surface space - no stain textures are needed.
 --
 
 local Config = require("src/config")
@@ -19,23 +23,25 @@ local G = require("src/globals")
 local Level = require("src/level")
 local Game = require("src/game")
 
-local Decals = {}
+local Bloodstain = {}
 
-Decals.MaxDecals = 48
-Decals.WallHalfWidth = 0.16
-Decals.WallHalfHeight = 0.15
-Decals.FloorHalfSize = 0.25
-Decals.TextureVariants = 4
--- 0 = hard rim and flat coverage steps, 1 = the smooth gaussian falloff
-Decals.Blur = 0
+Bloodstain.MaxStains = 48
+Bloodstain.WallHalfWidth = 0.16
+Bloodstain.WallHalfHeight = 0.15
+Bloodstain.FloorHalfSize = 0.25
+-- 0 = hard edged drops piling up in flat steps, 1 = soft round spray
+Bloodstain.Blur = 0
 
--- all decals, oldest first; kind = "wall" | "floor"
-Decals.list = {}
+-- all stains, oldest first; kind = "wall" | "floor"
+Bloodstain.list = {}
 
-local textures = {}
+-- quads need a texture to draw with; the pattern comes from the shader, so a
+-- plain 64x64 white image serves every stain (its size also sets the pixel
+-- scale the column quads are built in, see renderWallStains)
+local stainTexture
 
-local wallDecalShader
-local floorDecalShader
+local wallStainShader
+local floorStainShader
 
 local quadPool = {}
 
@@ -47,57 +53,68 @@ local function getQuad(i)
 end
 
 -- ------------------------------------------------------------------------
--- Textures: procedural splatter variants (straight alpha via ImageData)
--- ------------------------------------------------------------------------
-
-local function makeSplatTexture(rng)
-	local rnd = function() return rng:random() end
-	local size = 64
-	local data = love.image.newImageData(size, size)
-	local drops = {}
-	for i = 1, 26 do
-		local near = i <= 14
-		drops[i] = {
-			x = size * (near and (0.5 + (rnd() - 0.5) * 0.55) or rnd()),
-			y = size * (near and (0.5 + (rnd() - 0.5) * 0.55) or rnd()),
-			r = 1.2 + rnd() * (near and 6.0 or 4.0),
-			w = 0.6 + rnd() * 0.6
-		}
-	end
-	for y = 0, size - 1 do
-		for x = 0, size - 1 do
-			local f = 0.0
-			for _, d in ipairs(drops) do
-				local dx, dy = x - d.x, y - d.y
-				f = f + d.w * math.exp(-(dx * dx + dy * dy) / (2 * d.r * d.r))
-			end
-			local a = Utils.clamp(f, 0.0, 1.0)
-			-- pixel look: at Blur 0 the gaussian is thresholded into hard
-			-- drops; Blur 1 keeps the soft falloff
-			if Decals.Blur < 1 then
-				local soft = a
-				a = (a >= 0.5) and 1.0 or 0.0
-				a = a + (soft - a) * Decals.Blur
-			end
-			if a > 0.01 then
-				local shade = 0.7 + rnd() * 0.3
-				-- ImageData:setPixel takes floats in 0..1 (see AGENTS.md)
-				data:setPixel(x, y, 0.42 * shade, 0.02 * shade, 0.02 * shade, a)
-			end
-		end
-	end
-	local image = love.graphics.newImage(data)
-	-- nearest: the splatter keeps its texel edges instead of a bilinear smear
-	image:setFilter("nearest", "nearest")
-	return image
-end
-
--- ------------------------------------------------------------------------
 -- Shaders (light math mirrors raycaster.lua; array size 9 = MAX_LIGHTS there)
 -- ------------------------------------------------------------------------
 
+-- Shared by both stain shaders: the splatter pattern in local space, where
+-- local.x/local.y run -1..1 across the stain rectangle.
+local stainGLSL = [[
+uniform float uBlur;
+uniform float uSeed;
+
+float hash(float n) { return fract(sin(n) * 43758.5453); }
+
+vec4 stainPixel(vec2 local)
+{
+	// no drop reaches past 1.2 of the local radius, so skip the loop entirely
+	// for the parts of a quad the stain does not cover
+	if (dot(local, local) > 1.44) { return vec4(0.0); }
+
+	// 70 droplets placed by hash: the impact burst's construction with the
+	// time uniform dropped, so the spray is frozen against the surface. Drops
+	// are thrown out of a dense core and stretched along the throw direction;
+	// the last few are narrow vertical streaks (drips on a wall).
+	float cover = 0.0;
+	float tint = 0.0;
+	for (int i = 1; i <= 70; ++i) {
+		float fi = float(i);
+		float h1 = hash(fi * 12.9898 + uSeed * 78.233);
+		float h2 = hash(fi * 39.3467 + uSeed * 11.135);
+		float h3 = fract(h1 * 91.31);
+		bool streak = (fi > 62.0);
+		float ang = h1 * 6.2831853;
+		vec2 dir = vec2(cos(ang), sin(ang));
+		// dense core, sparse rim ("spread" is how far out the drop was thrown)
+		float spread = pow(h2, 1.7);
+		vec2 center = dir * spread * 0.85;
+		// a fat blob at the point of impact, specks thinning out to the rim
+		float rad = mix(0.17, 0.015, spread) * (0.5 + h3);
+		vec2 axis = streak ? vec2(0.0, 1.0) : dir;
+		float stretch = streak ? 3.0 + 3.0 * h3 : 1.0 + 1.2 * spread;
+		if (streak) { rad = 0.012 + 0.018 * h3; }
+		vec2 rel = local - center;
+		float d = length(vec2(dot(rel, axis) / stretch, dot(rel, vec2(-axis.y, axis.x))));
+		// hard discs where uBlur is 0, soft rims where it is 1
+		float m = mix(step(d, rad), 1.0 - smoothstep(rad * 0.45, rad, d), uBlur);
+		float w = m * mix(1.0, 0.5, spread);
+		cover = cover + w;
+		tint = tint + w * fract(h1 * 13.37);
+	}
+
+	// dense overlaps go opaque, like a stain rather than smoke; at uBlur 0 the
+	// coverage snaps to flat steps instead of shading a smooth ramp
+	float alpha = 1.0 - exp(-cover * 1.1);
+	alpha = mix(floor(alpha * 4.0 + 0.5) * 0.25, alpha, uBlur);
+	vec3 col = mix(vec3(0.24, 0.01, 0.015), vec3(0.58, 0.04, 0.04),
+		clamp(tint / max(cover, 0.0001), 0.0, 1.0));
+	// flat per-texel grain so the stain reads as painted pixels, not a blob
+	float grain = hash(floor(local.x * 32.0) * 12.9898 + floor(local.y * 32.0) * 78.233 + uSeed * 5.1);
+	return vec4(col * (1.0 - 0.16 * (1.0 - uBlur) * grain), alpha);
+}
+]]
+
 local function initShaders()
-	wallDecalShader = love.graphics.newShader([[
+	wallStainShader = love.graphics.newShader(stainGLSL .. [[
 uniform bool uLighting;
 uniform int uLightCount;
 uniform vec4 uLights[9];
@@ -125,24 +142,24 @@ float lightRestore(vec2 world)
 
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
-	vec4 texel = Texel(tex, tc);
-	if (texel.a < 0.02) { discard; }
+	vec4 stain = stainPixel(tc * 2.0 - 1.0);
+	if (stain.a < 0.02) { discard; }
 
-	if (!uLighting) { return vec4(texel.rgb, texel.a); }
+	if (!uLighting) { return stain; }
 
 	// color.r = fog weight, color.g = WallX, color.b/a = map tile coordinates / 256
 	float fog = color.r;
-	// the decal texture spans wall heights [uHLo, uHLo + uHSpan]
+	// the stain spans wall heights [uHLo, uHLo + uHSpan]
 	float wallH = uHLo + fract(tc.y) * uHSpan;
 	vec2 lightPos = vec2(color.b * 256.0 + color.g, color.a * 256.0 + wallH);
 	float lm = lightRestore(lightPos);
 
 	float weight = 1.0 - (1.0 - fog) * lm;
-	return vec4(texel.rgb * weight, texel.a);
+	return vec4(stain.rgb * weight, stain.a);
 }
 ]])
 
-	floorDecalShader = love.graphics.newShader([[
+	floorStainShader = love.graphics.newShader(stainGLSL .. [[
 uniform vec2 uPos;
 uniform vec2 uDir;
 uniform vec2 uPlane;
@@ -204,11 +221,11 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 	vec2 local = vec2(d.x * uCos + d.y * uSin, -d.x * uSin + d.y * uCos) / uHalf;
 	if (abs(local.x) > 1.0 || abs(local.y) > 1.0) { discard; }
 
-	vec4 texel = Texel(tex, local * 0.5 + 0.5);
-	if (texel.a < 0.02) { discard; }
+	vec4 stain = stainPixel(local);
+	if (stain.a < 0.02) { discard; }
 
 	float weight = shadeWeight(currentDist, world);
-	return vec4(texel.rgb * weight, texel.a);
+	return vec4(stain.rgb * weight, stain.a);
 }
 ]])
 end
@@ -217,43 +234,43 @@ end
 -- Init / clear / spawn
 -- ------------------------------------------------------------------------
 
-function Decals.Init()
+function Bloodstain.Init()
 	local ini = Config.loadINI(G.GameConfigFolder .. "EffectsConfig.ini")
 	if ini then
-		Decals.MaxDecals = Config.getNumber(ini, "DECALS", "MaxDecals", 48)
-		Decals.WallHalfWidth = Config.getNumber(ini, "DECALS", "WallHalfWidth", 0.16)
-		Decals.WallHalfHeight = Config.getNumber(ini, "DECALS", "WallHalfHeight", 0.15)
-		Decals.FloorHalfSize = Config.getNumber(ini, "DECALS", "FloorHalfSize", 0.25)
-		Decals.TextureVariants = Config.getNumber(ini, "DECALS", "TextureVariants", 4)
-		Decals.Blur = Utils.clamp(Config.getNumber(ini, "DECALS", "Blur", 0), 0, 1)
+		Bloodstain.MaxStains = Config.getNumber(ini, "BLOODSTAIN", "MaxStains", 48)
+		Bloodstain.WallHalfWidth = Config.getNumber(ini, "BLOODSTAIN", "WallHalfWidth", 0.16)
+		Bloodstain.WallHalfHeight = Config.getNumber(ini, "BLOODSTAIN", "WallHalfHeight", 0.15)
+		Bloodstain.FloorHalfSize = Config.getNumber(ini, "BLOODSTAIN", "FloorHalfSize", 0.25)
+		Bloodstain.Blur = Utils.clamp(Config.getNumber(ini, "BLOODSTAIN", "Blur", 0), 0, 1)
 	end
-	textures = {}
-	local rng = love.math.newRandomGenerator(love.math.getRandomSeed())
-	for i = 1, math.max(1, Decals.TextureVariants) do
-		textures[i] = makeSplatTexture(rng)
+	if not stainTexture then
+		local data = love.image.newImageData(64, 64)
+		data:mapPixel(function() return 1, 1, 1, 1 end)
+		stainTexture = love.graphics.newImage(data)
+		stainTexture:setFilter("nearest", "nearest")
 	end
 	initShaders()
 end
 
-function Decals.Clear()
-	Decals.list = {}
+function Bloodstain.Clear()
+	Bloodstain.list = {}
 end
 
-local function add(decal)
-	Decals.list[#Decals.list + 1] = decal
-	while #Decals.list > Decals.MaxDecals do
-		table.remove(Decals.list, 1)
+local function add(stain)
+	stain.seed = love.math.random() * 100
+	Bloodstain.list[#Bloodstain.list + 1] = stain
+	while #Bloodstain.list > Bloodstain.MaxStains do
+		table.remove(Bloodstain.list, 1)
 	end
 end
 
 -- entity was hit by the center ray; wallInfo (optional) describes the wall
 -- behind it: { mapX, mapY, side, wallX, height }
-function Decals.SpawnBloodHit(entity, wallInfo)
-	if #textures == 0 then return end
+function Bloodstain.Spawn(entity, wallInfo)
 	local dying = entity.KillAnimEnabled or entity.Hitpoints <= 0
 
-	if os.getenv("LARC_DEBUGDECALS") then
-		print(string.format("LARC debug decal: entity (%.2f,%.2f) hp=%d wall=%s",
+	if os.getenv("LARC_DEBUGBLOODSTAIN") then
+		print(string.format("LARC debug bloodstain: entity (%.2f,%.2f) hp=%d wall=%s",
 			entity.Pos.X, entity.Pos.Y, entity.Hitpoints,
 			wallInfo and string.format("(%d,%d) side=%s wallX=%.2f h=%.2f",
 				wallInfo.mapX, wallInfo.mapY, tostring(wallInfo.side), wallInfo.wallX, wallInfo.height) or "none"))
@@ -267,9 +284,8 @@ function Decals.SpawnBloodHit(entity, wallInfo)
 			side = wallInfo.side,
 			wallX = wallInfo.wallX,
 			height = wallInfo.height,
-			halfW = Decals.WallHalfWidth * (0.8 + love.math.random() * 0.5),
-			halfH = Decals.WallHalfHeight * (0.8 + love.math.random() * 0.5),
-			tex = textures[love.math.random(#textures)]
+			halfW = Bloodstain.WallHalfWidth * (0.8 + love.math.random() * 0.5),
+			halfH = Bloodstain.WallHalfHeight * (0.8 + love.math.random() * 0.5)
 		})
 		-- a kill throws a second, wider splatter up the wall
 		if dying then
@@ -280,9 +296,8 @@ function Decals.SpawnBloodHit(entity, wallInfo)
 				side = wallInfo.side,
 				wallX = Utils.clamp(wallInfo.wallX + (love.math.random() - 0.5) * 0.5, 0.05, 0.95),
 				height = Utils.clamp(wallInfo.height + (love.math.random() - 0.5) * 0.4, 0.05, 0.95),
-				halfW = Decals.WallHalfWidth * (0.5 + love.math.random() * 0.5),
-				halfH = Decals.WallHalfHeight * (0.5 + love.math.random() * 0.5),
-				tex = textures[love.math.random(#textures)]
+				halfW = Bloodstain.WallHalfWidth * (0.5 + love.math.random() * 0.5),
+				halfH = Bloodstain.WallHalfHeight * (0.5 + love.math.random() * 0.5)
 			})
 		end
 	end
@@ -295,9 +310,8 @@ function Decals.SpawnBloodHit(entity, wallInfo)
 			kind = "floor",
 			x = entity.Pos.X + (love.math.random() - 0.5) * spread,
 			y = entity.Pos.Y + (love.math.random() - 0.5) * spread,
-			half = Decals.FloorHalfSize * (dying and 1.8 or (0.8 + love.math.random() * 0.5)) / (1 + 0.35 * (i - 1)),
-			rot = love.math.random() * math.pi * 2,
-			tex = textures[love.math.random(#textures)]
+			half = Bloodstain.FloorHalfSize * (dying and 1.8 or (0.8 + love.math.random() * 0.5)) / (1 + 0.35 * (i - 1)),
+			rot = love.math.random() * math.pi * 2
 		})
 	end
 end
@@ -306,24 +320,25 @@ end
 -- Rendering (called from Raycaster.render, after the wall pass)
 -- ------------------------------------------------------------------------
 
-local function renderWallDecals(Raycaster)
+local function renderWallStains(Raycaster)
 	local records = Raycaster.WallRecords
 	local W = G.Canvas.Width
 	local TS = G.TextureSize
 	local fog = Raycaster.FogOfWarDistance
 	local lighting = Level.LightingFlag
+	local tw, th = stainTexture:getWidth(), stainTexture:getHeight()
 
 	love.graphics.setBlendMode("alpha")
-	love.graphics.setShader(wallDecalShader)
-	wallDecalShader:send("uLighting", lighting)
-	Raycaster.SendLights(wallDecalShader)
+	love.graphics.setShader(wallStainShader)
+	wallStainShader:send("uLighting", lighting)
+	wallStainShader:send("uBlur", Bloodstain.Blur)
+	Raycaster.SendLights(wallStainShader)
 
-	for _, d in ipairs(Decals.list) do
+	for _, d in ipairs(Bloodstain.list) do
 		if d.kind == "wall" then
-			wallDecalShader:send("uHLo", d.height - d.halfH)
-			wallDecalShader:send("uHSpan", 2 * d.halfH)
-			local tex = d.tex
-			local tw, th = tex:getWidth(), tex:getHeight()
+			wallStainShader:send("uHLo", d.height - d.halfH)
+			wallStainShader:send("uHSpan", 2 * d.halfH)
+			wallStainShader:send("uSeed", d.seed)
 			local w0, w1 = d.wallX - d.halfW, d.wallX + d.halfW
 			for x = 1, W do
 				local rec = records[x]
@@ -363,9 +378,13 @@ local function renderWallDecals(Raycaster)
 							end
 							local quad = getQuad(x)
 							quad:setViewport(u0, v0, u1 - u0, v1 - v0, tw, th)
+							-- the column's slice of the stain is (u1-u0) texels of a 64px
+							-- image, i.e. a fraction of a pixel; stretch it back out to the
+							-- one screen column it stands for, or it rasterizes away
+							local span = u1 - u0
 							-- identical vertex color as the wall slice beneath
 							love.graphics.setColor(fogW, rec.wallX, rec.mapX / 256, rec.mapY / 256)
-							love.graphics.draw(tex, quad, x - 1, y0, 0, 1, (y1 - y0) / (v1 - v0))
+							love.graphics.draw(stainTexture, quad, x - 1, y0, 0, 1 / math.max(span, 1e-6), (y1 - y0) / (v1 - v0))
 						end
 					end
 				end
@@ -376,34 +395,36 @@ local function renderWallDecals(Raycaster)
 	love.graphics.setColor(1, 1, 1, 1)
 end
 
-local function renderFloorDecals(Raycaster)
+local function renderFloorStains(Raycaster)
 	local W, H = G.Canvas.Width, G.Canvas.Height
 	local Player = Game.Player
 	local VLT = H + G.VerticalLook
 	local fog = Raycaster.FogOfWarDistance
 
 	love.graphics.setBlendMode("alpha")
-	love.graphics.setShader(floorDecalShader)
-	floorDecalShader:send("uPos", { Player.Pos.X, Player.Pos.Y })
-	floorDecalShader:send("uDir", { Player.Dir.X, Player.Dir.Y })
-	floorDecalShader:send("uPlane", { G.Plane.X, G.Plane.Y })
-	floorDecalShader:send("uVLT", VLT)
-	floorDecalShader:send("uViewport", { W, H })
-	floorDecalShader:send("uFogFloorCeiling", fog + fog * G.VerticalLookCamera)
-	floorDecalShader:send("uLighting", Level.LightingFlag)
-	Raycaster.SendLights(floorDecalShader)
-	floorDecalShader:send("uZBufTex", Raycaster.ZBufferImage)
+	love.graphics.setShader(floorStainShader)
+	floorStainShader:send("uPos", { Player.Pos.X, Player.Pos.Y })
+	floorStainShader:send("uDir", { Player.Dir.X, Player.Dir.Y })
+	floorStainShader:send("uPlane", { G.Plane.X, G.Plane.Y })
+	floorStainShader:send("uVLT", VLT)
+	floorStainShader:send("uViewport", { W, H })
+	floorStainShader:send("uFogFloorCeiling", fog + fog * G.VerticalLookCamera)
+	floorStainShader:send("uLighting", Level.LightingFlag)
+	floorStainShader:send("uBlur", Bloodstain.Blur)
+	Raycaster.SendLights(floorStainShader)
+	floorStainShader:send("uZBufTex", Raycaster.ZBufferImage)
 
 	local dirX, dirY = Player.Dir.X, Player.Dir.Y
 	local planeX, planeY = G.Plane.X, G.Plane.Y
 	local pp = planeX * planeX + planeY * planeY
 
-	for _, d in ipairs(Decals.list) do
+	for _, d in ipairs(Bloodstain.list) do
 		if d.kind == "floor" then
-			floorDecalShader:send("uCenter", { d.x, d.y })
-			floorDecalShader:send("uHalf", d.half)
-			floorDecalShader:send("uCos", math.cos(d.rot))
-			floorDecalShader:send("uSin", math.sin(d.rot))
+			floorStainShader:send("uCenter", { d.x, d.y })
+			floorStainShader:send("uHalf", d.half)
+			floorStainShader:send("uCos", math.cos(d.rot))
+			floorStainShader:send("uSin", math.sin(d.rot))
+			floorStainShader:send("uSeed", d.seed)
 
 			-- screen bbox of the rotated world-space square; a floor point at
 			-- perpendicular distance d projects to (W/2*(1+cam), VLT/2 + H/(2d))
@@ -431,8 +452,7 @@ local function renderFloorDecals(Raycaster)
 			maxY = Utils.clamp(maxY, 0, H)
 			local bw, bh = maxX - minX, maxY - minY
 			if bw > 0 and bh > 0 then
-				local tex = d.tex
-				love.graphics.draw(tex, minX, minY, 0, bw / tex:getWidth(), bh / tex:getHeight())
+				love.graphics.draw(stainTexture, minX, minY, 0, bw / stainTexture:getWidth(), bh / stainTexture:getHeight())
 			end
 		end
 	end
@@ -440,15 +460,15 @@ local function renderFloorDecals(Raycaster)
 	love.graphics.setColor(1, 1, 1, 1)
 end
 
-function Decals.Render()
-	if #Decals.list == 0 then return end
+function Bloodstain.Render()
+	if #Bloodstain.list == 0 then return end
 	local Raycaster = Game.Raycaster
-	renderWallDecals(Raycaster)
-	renderFloorDecals(Raycaster)
+	renderWallStains(Raycaster)
+	renderFloorStains(Raycaster)
 	love.graphics.setShader()
 	love.graphics.setBlendMode("alpha")
 	love.graphics.setColor(1, 1, 1, 1)
 end
 
-Game.Decals = Decals
-return Decals
+Game.Bloodstain = Bloodstain
+return Bloodstain

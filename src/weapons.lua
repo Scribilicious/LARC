@@ -4,6 +4,7 @@
 --
 
 local Config = require("src/config")
+local Sound = require("src/sound")
 local Utils = require("src/utils")
 local G = require("src/globals")
 local Level = require("src/level")
@@ -106,15 +107,18 @@ function Weapons.InitAudio()
 		local ini = Config.loadINI(iniFile)
 		if ini then
 			weapon.Sounds = {}
+			-- a shot is retriggered faster than the sample is long (the ARX160
+			-- blast runs 1.4s at cadence 500), so it needs a voice pool: one
+			-- voice would cut every previous shot off mid-tail
 			local shot = Config.getString(ini, "AUDIO", "SingleShotAudio")
-			weapon.Sounds[1] = shot and love.audio.newSource(Config.fixPath(shot), "static") or nil
+			weapon.Sounds[1] = shot and Sound.New(shot, { Voices = 12, PitchJitter = 0.04 }) or nil
 			local dryfire = Config.getString(ini, "AUDIO", "DryFireAudio")
-			weapon.Sounds[2] = dryfire and love.audio.newSource(Config.fixPath(dryfire), "static") or nil
+			weapon.Sounds[2] = dryfire and Sound.New(dryfire, { Voices = 3 }) or nil
 			local reload = Config.getString(ini, "AUDIO", "ReloadAudio")
-			weapon.Sounds[3] = reload and love.audio.newSource(Config.fixPath(reload), "static") or nil
+			weapon.Sounds[3] = reload and Sound.New(reload, { Voices = 2 }) or nil
 			if weapon.Sounds[3] then
 				-- duration in seconds -> ticks (FrameLock)
-				weapon.ReloadDuration = math.floor(weapon.Sounds[3]:getDuration() * G.FrameLock)
+				weapon.ReloadDuration = math.floor(weapon.Sounds[3]:GetDuration() * G.FrameLock)
 			else
 				weapon.ReloadDuration = 60
 			end
@@ -241,7 +245,7 @@ local function checkForHit()
 	if hitEntity then
 		Entities.HandleEntityHit(hitEntity)
 
-		-- LARC: blood decals - wall impact point behind the entity (the loop
+		-- LARC: blood stain - wall impact point behind the entity (the loop
 		-- above ended at that wall, so mapX/mapY is the wall cell)
 		local wallInfo = nil
 		if wallHit then
@@ -258,7 +262,7 @@ local function checkForHit()
 			local height = Utils.clamp((2 * math.floor(H / 2) - VLT + lineHeight) / (2 * lineHeight), 0.05, 0.95)
 			wallInfo = { mapX = mapX, mapY = mapY, side = hitSide, wallX = wallX, height = height }
 		end
-		Game.Decals.SpawnBloodHit(hitEntity, wallInfo)
+		Game.Bloodstain.Spawn(hitEntity, wallInfo)
 
 		-- LARC: blood spray at the impact point (world anchored, projected
 		-- per frame); height is the wall-height fraction *from the floor* of
@@ -333,7 +337,7 @@ function Weapons.InitiateReload()
 		if weapon.ReloadCounter == 0 and weapon.CarriedAmmo > 0 then
 			weapon.ReloadCounter = weapon.ReloadDuration
 			Weapons.CurrentWeaponState = Weapons.WEAPONSTATE.RELOADINITIATED
-			if weapon.Sounds and weapon.Sounds[3] then weapon.Sounds[3]:play() end
+			if weapon.Sounds and weapon.Sounds[3] then weapon.Sounds[3]:Play() end
 		end
 	end
 end
@@ -358,7 +362,7 @@ function Weapons.FireWeapon()
 		or Weapons.CurrentFiringState == Weapons.FIRINGSTATE.RAPIDFIRE then
 		if weapon.LoadedRounds > 0 and weapon.CadenceCounter <= 0 then
 			weapon.CadenceCounter = math.floor(3600 / weapon.Cadence)
-			if weapon.Sounds and weapon.Sounds[1] then weapon.Sounds[1]:play() end
+			if weapon.Sounds and weapon.Sounds[1] then weapon.Sounds[1]:Play() end
 
 			Weapons.WeaponMuzzleFlashFlag = true
 			weapon.MuzzleFlashCounter = weapon.MuzzleFlashDuration
@@ -366,7 +370,7 @@ function Weapons.FireWeapon()
 
 			checkForHit()
 		elseif Weapons.CurrentFiringState == Weapons.FIRINGSTATE.SINGLESHOT then
-			if weapon.Sounds and weapon.Sounds[2] then weapon.Sounds[2]:play() end
+			if weapon.Sounds and weapon.Sounds[2] then weapon.Sounds[2]:Play() end
 		end
 	end
 
