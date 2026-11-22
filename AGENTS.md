@@ -118,6 +118,27 @@ edges and wall-slice boundary rows.
   shader arrays are sized 9 (max lights per level in the shipped data);
   if larger level data ever needs more, bump `MAX_LIGHTS` in lockstep with
   both shaders' array declarations.
+- **Doors have a real leaf thickness** (LARC addition; the C++ intersects an
+  infinitely thin plane at the tile centre, cross-wise to whichever tile
+  border the ray crossed, and *misses the door on an exactly axis-aligned
+  centre column* because `sqrt(deltaDX^2 - 1)` goes NaN). `Doors.HitTest`
+  slab-intersects the leaf instead, and `Doors.Axis` (the thin axis) is baked
+  at level load from the neighbouring walls: neighbours on the +-X side mean
+  the door sits in a wall running along X, so the leaf is thin across Y
+  (corners / free-standing doors fall back to "y"). The leaf is centred in
+  the tile, spans the full tile along the slide axis and retracts towards the
+  low end of it - the same side the C++ `probe > OpenPercent` test leaves
+  passable - so it slides out of the doorway an amount equal to
+  `CurrentOpenPercent`. `Thickness` (tiles, clamped 0.01..0.9) is per door
+  type in `DATA/Assets_Doors/Door_<n>_Data.ini` `[GENERAL]`, default 0.15.
+  Big faces take the door texture at `fract(hit)` index as before; the thin
+  sides map the leaf's depth onto the texture's leading texel columns
+  (`floor(Across * Thickness * TextureSize)`), which is what reads as a solid
+  edge while the leaf slides. Column records keep their meaning
+  (`wallSide` = tangent axis is X, i.e. the hit face is at constant Y), so
+  blood stains still match their wall; `rec.mapX/mapY` of a door hit is now
+  the door tile itself (the C++ plane trick made it the tile one step back,
+  which offset the door's static-light sample).
 - `src/bloodstain.lua` (LARC addition, no C++ counterpart) keeps blood stains
   spawned when a hitscan hits an entity (`Weapons.checkForHit` continues its
   DDA past the entity to the wall behind and reports the impact point).

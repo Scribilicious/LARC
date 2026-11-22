@@ -318,7 +318,9 @@ local function castColumn(x, rec)
 	local wallHit = false
 	local wallSide = false
 	local doorNumber = -1
+	local doorHit = nil
 	local doors = Raycaster.Doors
+	local DoorsModule = Game.Doors
 	local wallLayer = Level.layers[Level.WALL]
 
 	while not wallHit do
@@ -332,37 +334,18 @@ local function castColumn(x, rec)
 			wallSide = true
 		end
 
+		-- LARC addition: the door leaf is a slab with a real thickness inside
+		-- the tile, not the C++'s infinitely thin plane at the tile centre, so
+		-- the column is intersected with that slab
 		for i = 1, #doors do
 			local door = doors[i]
-			if math.abs(door.Pos.X - mapX) < EPS and math.abs(door.Pos.Y - mapY) < EPS then
-				local mp2X, mp2Y = mapX, mapY
-				if posX < mp2X then mp2X = mp2X - 1.0 end
-				if posY > mp2Y then mp2Y = mp2Y + 1.0 end
-
-				local rayMulti
-				if wallSide then
-					rayMulti = (mp2Y - posY) / rayY
-				else
-					rayMulti = ((mp2X - posX) + 1.0) / rayX
-				end
-				local resX = posX + rayX * rayMulti
-				local resY = posY + rayY * rayMulti
-				local openPercent = door.CurrentOpenPercent
-
-				if not wallSide then
-					local stepYY = math.sqrt(deltaDX * deltaDX - 1.0)
-					local probeY = resY + (stepY * stepYY) * 0.5
-					if math.abs(math.floor(probeY) - mapY) < EPS and (probeY - mapY > openPercent / 100.0) then
-						wallHit = true
-						doorNumber = i
-					end
-				else
-					local stepXX = math.sqrt(deltaDY * deltaDY - 1.0)
-					local probeX = resX + (stepX * stepXX) * 0.5
-					if math.abs(math.floor(probeX) - mapX) < EPS and (probeX - mapX > openPercent / 100.0) then
-						wallHit = true
-						doorNumber = i
-					end
+			if door.Pos.X == mapX and door.Pos.Y == mapY then
+				local hit = DoorsModule.HitTest(door, posX, posY, rayX, rayY)
+				if hit then
+					wallHit = true
+					doorNumber = i
+					doorHit = hit
+					break
 				end
 			end
 		end
@@ -374,16 +357,16 @@ local function castColumn(x, rec)
 	end
 
 	local wallDist
-	if not wallSide then
-		if doorNumber > -1 then
-			mapX = mapX + stepX * 0.5
-		end
+	local tangentX
+	if doorHit then
+		wallDist = doorHit.T
+		tangentX = (doorHit.FaceAxis == "y")
+	elseif not wallSide then
 		wallDist = (mapX - posX + (1.0 - stepX) * 0.5) / rayX
+		tangentX = false
 	else
-		if doorNumber > -1 then
-			mapY = mapY + stepY * 0.5
-		end
 		wallDist = (mapY - posY + (1.0 - stepY) * 0.5) / rayY
+		tangentX = true
 	end
 
 	local lineHeight = math.floor(H / wallDist)
@@ -392,7 +375,7 @@ local function castColumn(x, rec)
 	local lineEnd = math.min(math.floor(lineHeight / 2) + temp, H)
 
 	local wallX
-	if wallSide then
+	if tangentX then
 		wallX = posX + wallDist * rayX
 	else
 		wallX = posY + wallDist * rayY
@@ -400,26 +383,33 @@ local function castColumn(x, rec)
 	wallX = wallX - math.floor(wallX)
 
 	local TS = G.TextureSize
-	local textureX = math.floor(wallX * TS) % TS
-
 	local isDoor = doorNumber > -1
-	if isDoor then
+	local textureX
+	if isDoor and doorHit and doorHit.FaceAxis ~= doors[doorNumber].Axis then
+		-- thin side of the leaf: its depth maps onto the leading texel
+		-- columns of the door texture, so the slab reads as one solid panel
 		local door = doors[doorNumber]
-		local doorType = Game.Doors.DoorTypes[door.DoorType]
-		-- Game_Raycaster.hpp: +1 while the door is not fully closed, then the
-		-- (truncated) percent offset; the content slide itself comes from the
-		-- per-door AnimTexture written by ModifyDoorTexture (Game_Doors.hpp)
-		if door.CurrentOpenPercent > doorType.MinimumOpenPercent then
-			textureX = textureX + 1
+		textureX = math.floor(doorHit.Across * door.Thickness * TS) % TS
+	else
+		textureX = math.floor(wallX * TS) % TS
+		if isDoor then
+			local door = doors[doorNumber]
+			local doorType = Game.Doors.DoorTypes[door.DoorType]
+			-- Game_Raycaster.hpp: +1 while the door is not fully closed, then the
+			-- (truncated) percent offset; the content slide itself comes from the
+			-- per-door AnimTexture written by ModifyDoorTexture (Game_Doors.hpp)
+			if door.CurrentOpenPercent > doorType.MinimumOpenPercent then
+				textureX = textureX + 1
+			end
+			textureX = textureX - math.floor(door.CurrentOpenPercent / doorType.MaximumOpenPercent)
 		end
-		textureX = textureX - math.floor(door.CurrentOpenPercent / doorType.MaximumOpenPercent)
 	end
 
 	-- fill record
 	rec.x = x
 	rec.isDoor = isDoor
 	rec.doorNumber = doorNumber
-	rec.wallSide = wallSide
+	rec.wallSide = tangentX
 	rec.lineStart = lineStart
 	rec.lineEnd = lineEnd
 	rec.wallDist = wallDist

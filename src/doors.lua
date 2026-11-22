@@ -34,6 +34,10 @@ function Doors.InitDoorAssets()
 			doorType.StayOpenTime = Config.getNumber(ini, "GENERAL", "StayOpenTime", 3) * G.FrameLock
 			doorType.MaximumOpenPercent = Config.getNumber(ini, "GENERAL", "MaximumOpenPercent", 100.0)
 			doorType.MinimumOpenPercent = Config.getNumber(ini, "GENERAL", "MinimumOpenPercent", 0.0)
+			-- LARC addition: leaf depth across the doorway, in tiles. The C++
+			-- draws the door as an infinitely thin plane; anything from a fine
+			-- frame (0.05) to a real slab (0.5) works, 0 would be degenerate
+			doorType.Thickness = Utils.clamp(Config.getNumber(ini, "GENERAL", "Thickness", 0.15), 0.01, 0.9)
 			Doors.DoorTypes[index] = doorType
 			index = index + 1
 		else
@@ -62,6 +66,84 @@ local function modifyDoorTexture(door)
 	door.AnimTexture:replacePixels(anim)
 end
 
+-- LARC addition: the door has no orientation in the level data, so derive it
+-- from the surrounding walls - a door whose neighbours sit on the +-X side is
+-- set into a wall running along X, so the leaf is thin across Y. Corners and
+-- free standing doors fall back to "y".
+local function findLeafAxis(x, y)
+	local acrossX = 0
+	local acrossY = 0
+	if Level.isWall(x - 1, y) then acrossX = acrossX + 1 end
+	if Level.isWall(x + 1, y) then acrossX = acrossX + 1 end
+	if Level.isWall(x, y - 1) then acrossY = acrossY + 1 end
+	if Level.isWall(x, y + 1) then acrossY = acrossY + 1 end
+	if acrossY > acrossX then return "x" end
+	return "y"
+end
+
+-- leaf bounds in map coordinates: x0, x1, y0, y1. The slab is centred in the
+-- door tile and retracts towards the low end of the axis it slides along,
+-- which is where the C++ leaves the passable gap (Game_Raycaster.hpp compares
+-- the tile fraction against OpenPercent).
+local function leafBounds(door)
+	local open = door.CurrentOpenPercent / 100.0
+	local half = door.Thickness * 0.5
+	local x, y = door.Pos.X, door.Pos.Y
+	if door.Axis == "y" then
+		return x + open, x + 1.0, y + 0.5 - half, y + 0.5 + half
+	end
+	return x + 0.5 - half, x + 0.5 + half, y + open, y + 1.0
+end
+
+local RAY_EPS = 1e-9
+
+-- Ray/leaf intersection for one column. Returns nil or
+-- { T = ray multiplier (same parameter as the raycaster's wallDist),
+--   FaceAxis = axis the hit face is perpendicular to,
+--   Across = 0..1 across the leaf's thickness (thin faces only) }
+function Doors.HitTest(door, posX, posY, rayX, rayY)
+	local x0, x1, y0, y1 = leafBounds(door)
+	if x1 - x0 < 1e-6 or y1 - y0 < 1e-6 then return nil end
+
+	local tNearX, tFarX
+	if math.abs(rayX) < RAY_EPS then
+		if posX < x0 or posX > x1 then return nil end
+		tNearX, tFarX = -math.huge, math.huge
+	else
+		tNearX = (x0 - posX) / rayX
+		tFarX = (x1 - posX) / rayX
+		if tNearX > tFarX then tNearX, tFarX = tFarX, tNearX end
+	end
+	local tNearY, tFarY
+	if math.abs(rayY) < RAY_EPS then
+		if posY < y0 or posY > y1 then return nil end
+		tNearY, tFarY = -math.huge, math.huge
+	else
+		tNearY = (y0 - posY) / rayY
+		tFarY = (y1 - posY) / rayY
+		if tNearY > tFarY then tNearY, tFarY = tFarY, tNearY end
+	end
+
+	-- tEnter <= 0 means the camera sits inside the leaf: there is no surface
+	-- left to draw, and letting the ray through beats a wall in your face
+	local tEnter = math.max(tNearX, tNearY)
+	if tEnter > math.min(tFarX, tFarY) or tEnter <= 0.0 then return nil end
+
+	-- Across is only used on the thin sides (the leaf's depth), so measure it
+	-- along the leaf's thin axis
+	local thinMin, thinMax, thinHit
+	if door.Axis == "y" then
+		thinMin, thinMax, thinHit = y0, y1, posY + tEnter * rayY
+	else
+		thinMin, thinMax, thinHit = x0, x1, posX + tEnter * rayX
+	end
+	return {
+		T = tEnter,
+		FaceAxis = (tNearX >= tNearY) and "x" or "y",
+		Across = Utils.clamp((thinHit - thinMin) / (thinMax - thinMin), 0.0, 1.0)
+	}
+end
+
 function Doors.InitDoors()
 	Doors.Doors = {}
 
@@ -77,6 +159,8 @@ function Doors.InitDoors()
 				door.CurrentOpenPercent = Doors.DoorTypes[foundDoorType].MinimumOpenPercent
 				door.StayOpenCounter = 0
 				door.CloseAudioFlag = false
+				door.Axis = findLeafAxis(mapPosX, mapPosY)
+				door.Thickness = Doors.DoorTypes[foundDoorType].Thickness
 				-- AnimTexture starts as a copy of the original (Game_Doors.hpp Init)
 				door.AnimData = love.image.newImageData(G.TextureSize, G.TextureSize)
 				door.AnimData:paste(Doors.DoorTypes[foundDoorType].TextureData, 0, 0)
