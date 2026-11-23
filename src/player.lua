@@ -80,10 +80,7 @@ function Player:HurtPlayer(damageDealt)
 end
 
 function Player:PlayAudio(sound)
-	local source = self.Sounds[sound]
-	if source then
-		source:play()
-	end
+	Utils.playSound(self.Sounds[sound])
 end
 
 return Player

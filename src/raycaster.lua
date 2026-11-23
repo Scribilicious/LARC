@@ -51,9 +51,11 @@ function Raycaster.Init()
 		Raycaster.VerticalLookDownLimit = Utils.clamp(Config.getNumber(ini, "RAYCASTER", "VerticalLookDownLimit", 0.4),
 			Raycaster.VerticalLookLimitMin, Raycaster.VerticalLookLimitMax)
 		Raycaster.VerticalLookStep = Config.getNumber(ini, "RAYCASTER", "VerticalLookStep", 0.02)
-		Raycaster.FogOfWarDistance = Config.getNumber(ini, "RAYCASTER", "FogOfWarDistance", 2.5)
+		Raycaster.FogOfWarDistance = Config.getNumber(ini, "RAYCASTER", "FogOfWarDistance", 7.5)
 	end
 	G.FogOfWarDistance = Raycaster.FogOfWarDistance
+print(G.GameConfigFolder .. "RaycasterConfig.ini")
+Utils.printTable(ini)
 
 	local w = G.Canvas.Width
 

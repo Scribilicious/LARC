@@ -156,10 +156,7 @@ function Doors.OpenCloseDoors()
 end
 
 function Doors.PlayAudio(door)
-	local sound = Doors.DoorTypes[door.DoorType].Sound
-	if sound then
-		sound:play()
-	end
+	Utils.playSound(Doors.DoorTypes[door.DoorType].Sound)
 end
 
 Game.Doors = Doors

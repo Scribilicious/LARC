@@ -321,7 +321,7 @@ function Weapons.InitiateReload()
 		if weapon.ReloadCounter == 0 and weapon.CarriedAmmo > 0 then
 			weapon.ReloadCounter = weapon.ReloadDuration
 			Weapons.CurrentWeaponState = Weapons.WEAPONSTATE.RELOADINITIATED
-			if weapon.Sounds and weapon.Sounds[3] then weapon.Sounds[3]:play() end
+			Utils.playSound(weapon.Sounds and weapon.Sounds[3])
 		end
 	end
 end
@@ -346,7 +346,7 @@ function Weapons.FireWeapon()
 		or Weapons.CurrentFiringState == Weapons.FIRINGSTATE.RAPIDFIRE then
 		if weapon.LoadedRounds > 0 and weapon.CadenceCounter <= 0 then
 			weapon.CadenceCounter = math.floor(3600 / weapon.Cadence)
-			if weapon.Sounds and weapon.Sounds[1] then weapon.Sounds[1]:play() end
+			Utils.playSound(weapon.Sounds and weapon.Sounds[1])
 
 			Weapons.WeaponMuzzleFlashFlag = true
 			weapon.MuzzleFlashCounter = weapon.MuzzleFlashDuration
@@ -354,7 +354,7 @@ function Weapons.FireWeapon()
 
 			checkForHit()
 		elseif Weapons.CurrentFiringState == Weapons.FIRINGSTATE.SINGLESHOT then
-			if weapon.Sounds and weapon.Sounds[2] then weapon.Sounds[2]:play() end
+			Utils.playSound(weapon.Sounds and weapon.Sounds[2])
 		end
 	end
 

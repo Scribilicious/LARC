@@ -49,6 +49,42 @@ function Utils.parseConfNumbers(line)
 	return values
 end
 
+-- A Source is a single playback voice: play() on an already playing source is
+-- a no-op, so rapid one-shots (e.g. rapid fire) would be dropped. Play through
+-- a small pool of clones so overlapping sounds each get a voice.
+local soundPools = setmetatable({}, { __mode = "k" })
+local MAX_SOUND_VOICES = 8
+
+function Utils.playSound(source)
+	if not source then return end
+	if source:isLooping() then
+		source:play()
+		return
+	end
+	local pool = soundPools[source]
+	if not pool then
+		pool = { voices = { source }, next = 1 }
+		soundPools[source] = pool
+	end
+	local voices = pool.voices
+	for i = 1, #voices do
+		if not voices[i]:isPlaying() then
+			voices[i]:play()
+			return
+		end
+	end
+	if #voices < MAX_SOUND_VOICES then
+		local clone = source:clone()
+		voices[#voices + 1] = clone
+		clone:play()
+	else
+		local s = voices[pool.next]
+		pool.next = pool.next % #voices + 1
+		s:stop()
+		s:play()
+	end
+end
+
 function Utils.fileExists(fileName)
 	local info = love.filesystem.getInfo(Config.fixPath(fileName))
 	return info ~= nil and info.type == "file"
@@ -57,6 +93,40 @@ end
 function Utils.folderExists(folderName)
 	local info = love.filesystem.getInfo(Config.fixPath(folderName))
 	return info ~= nil and info.type == "directory"
+end
+
+
+---Recursively print the table, if not table value is just printed.
+---@param t any
+---@param level? number
+function Utils.printTable(t, level)
+	local format = string.format
+	local rep = string.rep
+	local write = io.write
+    level = level or 0
+    if type(t) == "table" then
+        -- do not print new line on the level 0
+        if level ~= 0 then
+            write("\n")
+        end
+        write(rep("\t", level), "{\n")
+        level = level + 1
+
+        for key, value in pairs(t) do
+            write(rep("\t", level) .. format("[%s] = ", key))
+            printTable(value, level)
+            write(",\n")
+        end
+
+        level = level - 1
+        write(rep("\t", level), "}")
+    else
+        write(tostring(t))
+    end
+    -- print new line on the level 0
+    if level == 0 then
+        write("\n")
+    end
 end
 
 return Utils
